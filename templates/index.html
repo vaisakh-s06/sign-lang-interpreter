@@ -396,6 +396,77 @@
             display: none;
         }
 
+        #clientVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+            transform: scaleX(-1);
+        }
+
+        #clientCanvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+            display: none;
+        }
+
+        .camera-source-selector {
+            display: inline-flex;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border-glass);
+            border-radius: 10px;
+            padding: 2px;
+            gap: 2px;
+        }
+
+        .source-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .source-btn:hover {
+            color: #fff;
+        }
+
+        .source-btn.active {
+            background: var(--accent-gradient);
+            color: #fff;
+            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-flip-cam {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-glass);
+            color: var(--text-main);
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-flip-cam:hover {
+            background: rgba(99, 102, 241, 0.3);
+            color: #fff;
+        }
+
         /* Camera Standby Screen */
         .camera-standby-overlay {
             position: absolute;
@@ -1273,6 +1344,17 @@
                                 <span>Optical Camera Feed</span>
                             </div>
                             <div class="header-actions">
+                                <div class="camera-source-selector" id="cameraSourceSelector">
+                                    <button class="source-btn active" id="btnSourceDevice" title="Use camera on your phone or computer (0ms direct lag)">
+                                        <i class="fa-solid fa-mobile-screen-button"></i> <span>My Camera</span>
+                                    </button>
+                                    <button class="source-btn" id="btnSourceHost" title="View host laptop webcam">
+                                        <i class="fa-solid fa-desktop"></i> <span>Host Webcam</span>
+                                    </button>
+                                </div>
+                                <button class="btn-flip-cam" id="btnFlipCam" title="Flip front / back camera">
+                                    <i class="fa-solid fa-camera-rotate"></i>
+                                </button>
                                 <button class="btn-action" id="headerCameraToggleBtn" title="Toggle camera ON or OFF">
                                     <i class="fa-solid fa-video"></i> <span>Start Camera</span>
                                 </button>
@@ -1284,7 +1366,11 @@
                         </div>
 
                         <div class="video-viewport">
-                            <!-- Real-time Video Stream (Active only when camera is ON) -->
+                            <!-- Direct Hardware Video for Client Device Camera (0ms Latency) -->
+                            <video id="clientVideo" playsinline autoplay muted></video>
+                            <canvas id="clientCanvas"></canvas>
+
+                            <!-- Host Webcam MJPEG Stream (Fallback/Host mode) -->
                             <img id="videoFeed" src="" alt="Real-Time Sign Language Interpreter Video Feed">
 
                             <!-- Standby Privacy Overlay (Active when camera is OFF) -->
@@ -1740,19 +1826,45 @@
 
         // Camera Control Elements
         const videoFeed = document.getElementById('videoFeed');
+        const clientVideo = document.getElementById('clientVideo');
+        const clientCanvas = document.getElementById('clientCanvas');
         const cameraStandbyOverlay = document.getElementById('cameraStandbyOverlay');
         const standbyStartCameraBtn = document.getElementById('standbyStartCameraBtn');
         const headerCameraToggleBtn = document.getElementById('headerCameraToggleBtn');
         const bottomCameraToggleBtn = document.getElementById('bottomCameraToggleBtn');
         const bottomCameraToggleText = document.getElementById('bottomCameraToggleText');
+        const btnSourceDevice = document.getElementById('btnSourceDevice');
+        const btnSourceHost = document.getElementById('btnSourceHost');
+        const btnFlipCam = document.getElementById('btnFlipCam');
         const hudOverlay = document.getElementById('hudOverlay');
         const hudBottomBar = document.getElementById('hudBottomBar');
         const cameraStatusDot = document.getElementById('cameraStatusDot');
         const cameraStatusText = document.getElementById('cameraStatusText');
         const quickStopCamBtn = document.getElementById('quickStopCamBtn');
 
-        // State
+        // State & Mode Management
         let isCameraActive = false;
+        // Default to 'device' (user's phone/webcam) for 0ms lag
+        let selectedCameraMode = 'device';
+        let clientMediaStream = null;
+        let clientFacingMode = 'user'; // 'user' (front) or 'environment' (back)
+        let deviceFrameTimer = null;
+        let deviceFrameInFlight = false;
+
+        const offscreenCanvas = document.createElement('canvas');
+        offscreenCanvas.width = 320;
+        offscreenCanvas.height = 240;
+        const offscreenCtx = offscreenCanvas.getContext('2d');
+
+        const HAND_CONNECTIONS = [
+            [0, 1], [1, 2], [2, 3], [3, 4],
+            [0, 5], [5, 6], [6, 7], [7, 8],
+            [5, 9], [9, 10], [10, 11], [11, 12],
+            [9, 13], [13, 14], [14, 15], [15, 16],
+            [13, 17], [17, 18], [18, 19], [19, 20],
+            [0, 17]
+        ];
+
         let accumulatedSentence = "";
         let autoAddEnabled = true;
         let currentLiveSign = "";
@@ -1768,6 +1880,58 @@
         const COMMIT_HOLD_DURATION_MS = 350;
         // Withdrawing hand for 180ms unlocks latch so the same symbol can be typed again
         const HAND_CLEARED_THRESHOLD_MS = 180;
+
+        // Camera Source Selector
+        function updateCameraModeUI() {
+            if (selectedCameraMode === 'device') {
+                if (btnSourceDevice) btnSourceDevice.classList.add('active');
+                if (btnSourceHost) btnSourceHost.classList.remove('active');
+                if (btnFlipCam && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+                    btnFlipCam.style.display = 'inline-flex';
+                }
+            } else {
+                if (btnSourceHost) btnSourceHost.classList.add('active');
+                if (btnSourceDevice) btnSourceDevice.classList.remove('active');
+                if (btnFlipCam) btnFlipCam.style.display = 'none';
+            }
+        }
+        updateCameraModeUI();
+
+        if (btnSourceDevice) {
+            btnSourceDevice.addEventListener('click', async () => {
+                if (selectedCameraMode === 'device') return;
+                const wasRunning = isCameraActive;
+                if (wasRunning) stopCamera();
+                selectedCameraMode = 'device';
+                updateCameraModeUI();
+                showToast("Switched to Device Camera (0ms lag)", "fa-mobile-screen-button");
+                if (wasRunning) startCamera();
+            });
+        }
+
+        if (btnSourceHost) {
+            btnSourceHost.addEventListener('click', () => {
+                if (selectedCameraMode === 'host') return;
+                const wasRunning = isCameraActive;
+                if (wasRunning) stopCamera();
+                selectedCameraMode = 'host';
+                updateCameraModeUI();
+                showToast("Switched to Host Laptop Webcam", "fa-desktop");
+                if (wasRunning) startCamera();
+            });
+        }
+
+        if (btnFlipCam) {
+            btnFlipCam.addEventListener('click', async () => {
+                if (selectedCameraMode !== 'device') return;
+                clientFacingMode = (clientFacingMode === 'user') ? 'environment' : 'user';
+                if (isCameraActive) {
+                    stopDeviceCamera();
+                    await startDeviceCamera();
+                }
+                showToast(`Switched to ${clientFacingMode === 'user' ? 'Front' : 'Rear'} Camera`, "fa-camera-rotate");
+            });
+        }
 
         // View Navigation
         const sidebarBtns = document.querySelectorAll('.sidebar-btn');
@@ -1805,10 +1969,200 @@
             });
         });
 
-        // Camera Hardware Lifecycle Management
-        function startCamera() {
-            if (isCameraActive) return;
-            cameraStatusText.textContent = "Connecting...";
+        // Device Camera Handling (0ms Local Latency)
+        async function startDeviceCamera() {
+            cameraStatusText.textContent = "Connecting device camera...";
+            cameraStatusDot.style.color = "var(--accent-amber)";
+
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error("getUserMedia is not supported on this browser or connection.");
+                }
+
+                const constraints = {
+                    audio: false,
+                    video: {
+                        facingMode: clientFacingMode,
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                };
+
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                clientMediaStream = stream;
+                clientVideo.srcObject = stream;
+                await clientVideo.play();
+
+                if (clientFacingMode === 'user') {
+                    clientVideo.style.transform = 'scaleX(-1)';
+                } else {
+                    clientVideo.style.transform = 'none';
+                }
+
+                isCameraActive = true;
+                clientVideo.style.display = 'block';
+                clientCanvas.style.display = 'block';
+                videoFeed.style.display = 'none';
+                cameraStandbyOverlay.classList.add('hidden');
+                hudOverlay.style.display = 'flex';
+                hudBottomBar.style.display = 'flex';
+
+                headerCameraToggleBtn.innerHTML = '<i class="fa-solid fa-stop"></i> <span>Stop Camera</span>';
+                headerCameraToggleBtn.classList.add('btn-danger');
+                bottomCameraToggleBtn.classList.add('btn-danger');
+                bottomCameraToggleText.textContent = 'Turn Camera OFF';
+                cameraStatusDot.style.color = 'var(--accent-emerald)';
+                cameraStatusText.textContent = 'Device Camera Live (0ms lag)';
+                showToast("Device camera active (0ms lag)", "fa-video");
+
+                startDeviceFrameLoop();
+            } catch (err) {
+                console.error("Device camera access error:", err);
+                isCameraActive = false;
+                cameraStatusText.textContent = "Camera Off";
+                cameraStatusDot.style.color = "var(--text-sub)";
+                showToast("Device camera unavailable: " + (err.name === 'NotAllowedError' ? 'Permission denied' : err.message), "fa-triangle-exclamation");
+            }
+        }
+
+        function stopDeviceCamera() {
+            if (deviceFrameTimer) {
+                clearInterval(deviceFrameTimer);
+                deviceFrameTimer = null;
+            }
+            if (clientMediaStream) {
+                try {
+                    clientMediaStream.getTracks().forEach(track => track.stop());
+                } catch (e) {}
+                clientMediaStream = null;
+            }
+            if (clientVideo) {
+                clientVideo.srcObject = null;
+                clientVideo.style.display = 'none';
+            }
+            if (clientCanvas) {
+                const ctx = clientCanvas.getContext('2d');
+                ctx.clearRect(0, 0, clientCanvas.width, clientCanvas.height);
+                clientCanvas.style.display = 'none';
+            }
+            deviceFrameInFlight = false;
+        }
+
+        function startDeviceFrameLoop() {
+            if (deviceFrameTimer) clearInterval(deviceFrameTimer);
+            deviceFrameTimer = setInterval(() => {
+                if (!isCameraActive || selectedCameraMode !== 'device') return;
+                if (deviceFrameInFlight) return;
+                if (!clientVideo || clientVideo.readyState < 2) return;
+
+                offscreenCtx.save();
+                if (clientFacingMode === 'user') {
+                    offscreenCtx.translate(320, 0);
+                    offscreenCtx.scale(-1, 1);
+                }
+                offscreenCtx.drawImage(clientVideo, 0, 0, 320, 240);
+                offscreenCtx.restore();
+
+                const dataUrl = offscreenCanvas.toDataURL('image/jpeg', 0.50);
+                deviceFrameInFlight = true;
+
+                if (socket && socket.connected) {
+                    socket.emit('device_frame', { image: dataUrl });
+                } else {
+                    fetch('/api/predict_frame', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image: dataUrl })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        deviceFrameInFlight = false;
+                        if (selectedCameraMode === 'device' && isCameraActive) {
+                            handlePrediction(data);
+                            drawDeviceLandmarks(data);
+                        }
+                    })
+                    .catch(() => { deviceFrameInFlight = false; });
+                }
+            }, 110);
+        }
+
+        function drawDeviceLandmarks(data) {
+            if (!clientCanvas || !clientVideo || !isCameraActive) return;
+            const W = clientVideo.videoWidth || clientVideo.clientWidth || 640;
+            const H = clientVideo.videoHeight || clientVideo.clientHeight || 480;
+            if (clientCanvas.width !== W || clientCanvas.height !== H) {
+                clientCanvas.width = W;
+                clientCanvas.height = H;
+            }
+            const ctx = clientCanvas.getContext('2d');
+            ctx.clearRect(0, 0, W, H);
+
+            if (!data || !data.detected || !data.hands || data.hands.length === 0) {
+                return;
+            }
+
+            const isMessi = data.is_messi;
+            const pointColor = isMessi ? '#fbbf24' : '#06b6d4';
+            const lineColor = isMessi ? 'rgba(251, 191, 36, 0.75)' : 'rgba(99, 102, 241, 0.65)';
+
+            data.hands.forEach(handLandmarks => {
+                // Draw skeleton connections
+                ctx.strokeStyle = lineColor;
+                ctx.lineWidth = 3;
+                ctx.lineCap = 'round';
+                HAND_CONNECTIONS.forEach(([start, end]) => {
+                    if (handLandmarks[start] && handLandmarks[end]) {
+                        const x1 = handLandmarks[start].x * W;
+                        const y1 = handLandmarks[start].y * H;
+                        const x2 = handLandmarks[end].x * W;
+                        const y2 = handLandmarks[end].y * H;
+                        ctx.beginPath();
+                        ctx.moveTo(x1, y1);
+                        ctx.lineTo(x2, y2);
+                        ctx.stroke();
+                    }
+                });
+
+                // Draw landmark joint points
+                ctx.fillStyle = pointColor;
+                handLandmarks.forEach(lm => {
+                    const x = lm.x * W;
+                    const y = lm.y * H;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            });
+
+            // Bounding box & label for recognized gesture
+            if (!isMessi && data.bbox && data.bbox.length === 4 && data.text) {
+                const [min_x, min_y, max_x, max_y] = data.bbox;
+                const bx1 = Math.max(0, min_x * W - 15);
+                const by1 = Math.max(0, min_y * H - 15);
+                const bx2 = Math.min(W, max_x * W + 15);
+                const by2 = Math.min(H, max_y * H + 15);
+
+                const boxColor = data.confidence >= 65 ? '#10b981' : '#38bdf8';
+                ctx.strokeStyle = boxColor;
+                ctx.lineWidth = 2.5;
+                ctx.strokeRect(bx1, by1, bx2 - bx1, by2 - by1);
+
+                // Label badge
+                const label = `${data.text} (${data.confidence.toFixed(1)}%)`;
+                ctx.font = 'bold 15px "Plus Jakarta Sans", sans-serif';
+                const textWidth = ctx.measureText(label).width;
+                const badgeY = Math.max(26, by1);
+                ctx.fillStyle = boxColor;
+                ctx.fillRect(bx1, badgeY - 24, textWidth + 14, 24);
+                ctx.fillStyle = '#000000';
+                ctx.fillText(label, bx1 + 7, badgeY - 7);
+            }
+        }
+
+        // Host Camera Handling (Stream from host laptop webcam)
+        function startHostCamera() {
+            cameraStatusText.textContent = "Connecting host webcam...";
             cameraStatusDot.style.color = "var(--accent-amber)";
 
             fetch('/api/camera/start', { method: 'POST' })
@@ -1816,6 +2170,8 @@
                 .then(data => {
                     if (data && data.is_running) {
                         isCameraActive = true;
+                        clientVideo.style.display = 'none';
+                        clientCanvas.style.display = 'none';
                         if (!videoFeed.src || videoFeed.src.indexOf('/video_feed') === -1) {
                             videoFeed.src = '/video_feed?t=' + Date.now();
                         }
@@ -1829,29 +2185,48 @@
                         bottomCameraToggleBtn.classList.add('btn-danger');
                         bottomCameraToggleText.textContent = 'Turn Camera OFF';
                         cameraStatusDot.style.color = 'var(--accent-emerald)';
-                        cameraStatusText.textContent = 'Camera Live (30 FPS)';
-                        showToast("Webcam connected & active", "fa-video");
+                        cameraStatusText.textContent = 'Host Webcam Live';
+                        showToast("Host webcam connected", "fa-desktop");
                     } else {
                         throw new Error(data && data.error ? data.error : "Camera unavailable");
                     }
                 })
                 .catch(err => {
-                    console.error("Camera start failed:", err);
+                    console.error("Host camera start failed:", err);
                     isCameraActive = false;
                     videoFeed.removeAttribute('src');
                     videoFeed.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
                     cameraStatusText.textContent = "Camera Off";
                     cameraStatusDot.style.color = "var(--text-sub)";
-                    showToast("Failed to access camera. Please check permissions", "fa-triangle-exclamation");
+                    showToast("Failed to connect host webcam. Use 'My Camera' instead", "fa-triangle-exclamation");
                 });
         }
 
-        function stopCamera() {
-            if (!isCameraActive && (!videoFeed.src || videoFeed.src.indexOf('/video_feed') === -1)) return;
-            isCameraActive = false;
+        function stopHostCamera() {
             videoFeed.removeAttribute('src');
             videoFeed.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
             videoFeed.style.display = 'none';
+
+            fetch('/api/camera/stop', { method: 'POST' })
+                .then(res => res.json())
+                .catch(() => {});
+        }
+
+        // Master Camera Start/Stop
+        function startCamera() {
+            if (isCameraActive) return;
+            if (selectedCameraMode === 'device') {
+                startDeviceCamera();
+            } else {
+                startHostCamera();
+            }
+        }
+
+        function stopCamera() {
+            isCameraActive = false;
+            stopDeviceCamera();
+            stopHostCamera();
+
             cameraStandbyOverlay.classList.remove('hidden');
             hudOverlay.style.display = 'none';
             hudBottomBar.style.display = 'none';
@@ -1875,13 +2250,7 @@
                 liveSignConf.style.color = 'var(--text-sub)';
             }
             if (livePulseDot) livePulseDot.classList.remove('active');
-
-            fetch('/api/camera/stop', { method: 'POST' })
-                .then(res => res.json())
-                .then(() => {
-                    showToast("Webcam released", "fa-power-off");
-                })
-                .catch(err => console.error(err));
+            showToast("Camera turned off", "fa-power-off");
         }
 
         function toggleCamera() {
@@ -2002,6 +2371,7 @@
         });
 
         socket.on('camera_status', (data) => {
+            if (selectedCameraMode !== 'host') return;
             if (data.running) {
                 isCameraActive = true;
                 if (!videoFeed.src || videoFeed.src.indexOf('/video_feed') === -1) {
@@ -2016,7 +2386,7 @@
                 bottomCameraToggleBtn.classList.add('btn-danger');
                 bottomCameraToggleText.textContent = 'Turn Camera OFF';
                 cameraStatusDot.style.color = 'var(--accent-emerald)';
-                cameraStatusText.textContent = 'Camera Live (30 FPS)';
+                cameraStatusText.textContent = 'Host Webcam Live';
             } else if (!data.running && isCameraActive) {
                 isCameraActive = false;
                 videoFeed.removeAttribute('src');
@@ -2171,11 +2541,23 @@
         }
 
         // Listen for Real-Time Predictions via WebSocket
-        socket.on('prediction', handlePrediction);
+        socket.on('prediction', (data) => {
+            if (selectedCameraMode === 'host' && isCameraActive) {
+                handlePrediction(data);
+            }
+        });
 
-        // Graceful fallback polling: ONLY active if WebSocket is disconnected
+        socket.on('device_prediction', (data) => {
+            deviceFrameInFlight = false;
+            if (selectedCameraMode === 'device' && isCameraActive) {
+                handlePrediction(data);
+                drawDeviceLandmarks(data);
+            }
+        });
+
+        // Graceful fallback polling: ONLY active if WebSocket is disconnected in host mode
         setInterval(() => {
-            if (isCameraActive && (!socket || !socket.connected)) {
+            if (isCameraActive && selectedCameraMode === 'host' && (!socket || !socket.connected)) {
                 fetch('/api/prediction')
                     .then(res => res.json())
                     .then(data => {

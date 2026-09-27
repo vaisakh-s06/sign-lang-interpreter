@@ -17,6 +17,7 @@ import math
 import pickle
 import threading
 import warnings
+import base64
 from collections import deque
 import numpy as np
 import cv2
@@ -249,6 +250,228 @@ def targeted_disambiguation(class_id, confidence, data_aux):
     return class_id, confidence
 
 
+# MediaPipe utilities shared by host camera and device camera endpoints
+mp_hands = mp.solutions.hands
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
+
+
+def analyze_frame(frame, hands_detector, history_deque=None, draw_on_frame=True):
+    """
+    Analyzes a BGR image frame with MediaPipe hands and the trained classifier.
+    Computes scale-invariant features, dual-chirality mirror predictions,
+    temporal smoothing, Messi celebration detection, and targeted disambiguation.
+    Returns prediction dictionary with text, confidence, bbox, landmarks, and Messi flag.
+    """
+    H, W, _ = frame.shape
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    try:
+        results = hands_detector.process(frame_rgb)
+    except Exception as e:
+        print(f"[WARN] Hands process error: {e}")
+        return {
+            'text': '', 'confidence': 0.0, 'class_id': -1,
+            'detected': False, 'is_messi': False, 'bbox': None, 'hands': []
+        }
+
+    valid_hands = []
+    if results.multi_hand_landmarks:
+        for i, hl in enumerate(results.multi_hand_landmarks):
+            h_score = 1.0
+            h_label = 'Right'
+            if results.multi_handedness and i < len(results.multi_handedness):
+                classification = results.multi_handedness[i].classification[0]
+                h_score = classification.score
+                h_label = classification.label
+
+            hx = [lm.x for lm in hl.landmark]
+            hy = [lm.y for lm in hl.landmark]
+            min_x, max_x = min(hx), max(hx)
+            min_y, max_y = min(hy), max(hy)
+            box_w = max_x - min_x
+            box_h = max_y - min_y
+            area = box_w * box_h
+
+            # Reject wall textures, shadows, and low-confidence phantom hands
+            if h_score >= 0.58 and area >= 0.012 and 0.20 <= (box_w / (box_h + 1e-4)) <= 5.0:
+                valid_hands.append({
+                    'landmarks': hl,
+                    'score': h_score,
+                    'label': h_label,
+                    'area': area,
+                    'min_x': min_x, 'max_x': max_x,
+                    'min_y': min_y, 'max_y': max_y
+                })
+
+    if valid_hands:
+        # Check for Lionel Messi celebration: BOTH hands pointing upward to the sky
+        is_messi = False
+        if len(valid_hands) >= 2:
+            h1 = valid_hands[0]['landmarks']
+            h2 = valid_hands[1]['landmarks']
+
+            w1_x = h1.landmark[0].x
+            w2_x = h2.landmark[0].x
+            t1_x = h1.landmark[8].x
+            t2_x = h2.landmark[8].x
+
+            hands_separated = (abs(w1_x - w2_x) >= 0.18) or (abs(t1_x - t2_x) >= 0.16)
+            if hands_separated and is_hand_pointing_up(h1) and is_hand_pointing_up(h2):
+                is_messi = True
+
+        if is_messi:
+            if history_deque is not None:
+                history_deque.clear()
+
+            if draw_on_frame:
+                gold_color = (0, 215, 255)
+                for vh in valid_hands[:2]:
+                    hl = vh['landmarks']
+                    mp_drawing.draw_landmarks(
+                        frame, hl, mp_hands.HAND_CONNECTIONS,
+                        mp_drawing_styles.get_default_hand_landmarks_style(),
+                        mp_drawing_styles.get_default_hand_connections_style()
+                    )
+                    hx = [lm.x for lm in hl.landmark]
+                    hy = [lm.y for lm in hl.landmark]
+                    bx1 = max(0, int(min(hx) * W) - 15)
+                    by1 = max(0, int(min(hy) * H) - 15)
+                    bx2 = min(W, int(max(hx) * W) + 15)
+                    by2 = min(H, int(max(hy) * H) + 15)
+                    cv2.rectangle(frame, (bx1, by1), (bx2, by2), gold_color, 3)
+                    cv2.putText(frame, "Lional Messi - The GOAT (99.0%)", (bx1, max(30, by1 - 10)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, gold_color, 2, cv2.LINE_AA)
+
+                banner_w = 420
+                bx_start = max(0, (W - banner_w) // 2)
+                cv2.rectangle(frame, (bx_start, 10), (bx_start + banner_w, 55), (0, 140, 255), -1)
+                cv2.putText(frame, "LIONAL MESSI - THE GOAT", (bx_start + 25, 43),
+                            cv2.FONT_HERSHEY_DUPLEX, 0.90, (255, 255, 255), 2, cv2.LINE_AA)
+
+            hands_coords = [
+                [{'x': round(float(lm.x), 4), 'y': round(float(lm.y), 4)} for lm in valid_hands[0]['landmarks'].landmark],
+                [{'x': round(float(lm.x), 4), 'y': round(float(lm.y), 4)} for lm in valid_hands[1]['landmarks'].landmark]
+            ]
+            return {
+                'text': 'lional messi-the goat🐐',
+                'confidence': 99.0,
+                'class_id': 33,
+                'detected': True,
+                'is_messi': True,
+                'bbox': [0.0, 0.0, 1.0, 1.0],
+                'hands': hands_coords
+            }
+        else:
+            # Single-hand signs (A-Z and 7 words)
+            primary_vh = max(valid_hands, key=lambda item: (item['area'], item['score']))
+            primary_hl = primary_vh['landmarks']
+
+            if draw_on_frame:
+                mp_drawing.draw_landmarks(
+                    frame, primary_hl, mp_hands.HAND_CONNECTIONS,
+                    mp_drawing_styles.get_default_hand_landmarks_style(),
+                    mp_drawing_styles.get_default_hand_connections_style()
+                )
+
+            min_x, max_x = primary_vh['min_x'], primary_vh['max_x']
+            min_y, max_y = primary_vh['min_y'], primary_vh['max_y']
+            scale = max(max_x - min_x, max_y - min_y)
+            if scale < 1e-4:
+                scale = 1.0
+
+            data_aux = []
+            for lm in primary_hl.landmark:
+                data_aux.append((lm.x - min_x) / scale)
+                data_aux.append((lm.y - min_y) / scale)
+
+            hands_coords = [
+                [{'x': round(float(lm.x), 4), 'y': round(float(lm.y), 4)} for lm in primary_hl.landmark]
+            ]
+
+            if model is not None and len(data_aux) == 42:
+                try:
+                    data_aux_mirr = mirror_features(data_aux)
+                    feat_orig = np.asarray(data_aux, dtype=np.float32).reshape(1, -1)
+                    feat_mirr = np.asarray(data_aux_mirr, dtype=np.float32).reshape(1, -1)
+
+                    # Batched vectorized prediction: 2x faster than 2 separate predict_proba calls
+                    probs = model.predict_proba(np.vstack([feat_orig, feat_mirr]))
+                    prob_orig = probs[0]
+                    prob_mirr = probs[1]
+
+                    if np.max(prob_mirr) > np.max(prob_orig):
+                        active_feat = data_aux_mirr
+                    else:
+                        active_feat = data_aux
+
+                    combined_proba = np.maximum(prob_orig, prob_mirr)
+                    if history_deque is not None:
+                        history_deque.append(combined_proba)
+                        smoothed_proba = np.mean(history_deque, axis=0)
+                    else:
+                        smoothed_proba = combined_proba
+
+                    best_idx = int(np.argmax(smoothed_proba))
+                    class_id = int(str(model.classes_[best_idx]))
+                    confidence = float(smoothed_proba[best_idx])
+
+                    class_id, confidence = targeted_disambiguation(class_id, confidence, active_feat)
+                    predicted_char = LABELS_DICT.get(class_id, None)
+
+                    if predicted_char is not None and confidence >= 0.40:
+                        x1 = max(0, int(min_x * W) - 15)
+                        y1 = max(0, int(min_y * H) - 15)
+                        x2 = min(W, int(max_x * W) + 15)
+                        y2 = min(H, int(max_y * H) + 15)
+
+                        if draw_on_frame:
+                            box_color = (46, 204, 113) if confidence >= 0.65 else (52, 152, 219)
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
+                            label_text = f"{predicted_char} ({confidence * 100:.1f}%)"
+                            (txt_w, txt_h), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                            tag_y1 = max(0, y1 - txt_h - 12)
+                            tag_y2 = y1
+                            cv2.rectangle(frame, (x1, tag_y1), (x1 + txt_w + 16, tag_y2), box_color, -1)
+                            cv2.putText(frame, label_text, (x1 + 8, max(txt_h + 4, tag_y2 - 6)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2, cv2.LINE_AA)
+
+                        return {
+                            'text': predicted_char,
+                            'confidence': round(confidence * 100, 1),
+                            'class_id': class_id,
+                            'detected': True,
+                            'is_messi': False,
+                            'bbox': [round(float(min_x), 4), round(float(min_y), 4), round(float(max_x), 4), round(float(max_y), 4)],
+                            'hands': hands_coords
+                        }
+                except Exception as e:
+                    print(f"[WARN] Prediction error: {e}")
+
+            return {
+                'text': '',
+                'confidence': 0.0,
+                'class_id': -1,
+                'detected': False,
+                'is_messi': False,
+                'bbox': [round(float(min_x), 4), round(float(min_y), 4), round(float(max_x), 4), round(float(max_y), 4)],
+                'hands': hands_coords
+            }
+
+    if history_deque is not None:
+        history_deque.clear()
+
+    return {
+        'text': '',
+        'confidence': 0.0,
+        'class_id': -1,
+        'detected': False,
+        'is_messi': False,
+        'bbox': None,
+        'hands': []
+    }
+
+
 class CameraStream:
     """
     On-demand camera stream manager that strictly accesses webcam hardware
@@ -270,9 +493,9 @@ class CameraStream:
         self.prediction_history = deque(maxlen=4)
 
         # MediaPipe setup configured for single and dual hand recognition (Messi celebration)
-        self.mp_hands = mp.solutions.hands
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.mp_drawing_styles = mp.solutions.drawing_styles
+        self.mp_hands = mp_hands
+        self.mp_drawing = mp_drawing
+        self.mp_drawing_styles = mp_drawing_styles
         self.hands = None
         self._create_hands_detector()
 
@@ -438,242 +661,28 @@ class CameraStream:
 
                 # Mirror frame for natural interaction display
                 frame = cv2.flip(raw, 1)
-                H, W, _ = frame.shape
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-                # Process hand landmarks with MediaPipe safely
-                try:
-                    results = self.hands.process(frame_rgb)
-                except Exception as e:
-                    print(f"[WARN] MediaPipe frame processing notice: {e}")
-                    self._create_hands_detector()
-                    time.sleep(0.01)
-                    continue
-                detected_signs = []
-
-                valid_hands = []
-                if results.multi_hand_landmarks:
-                    for i, hl in enumerate(results.multi_hand_landmarks):
-                        h_score = 1.0
-                        h_label = 'Right'
-                        if results.multi_handedness and i < len(results.multi_handedness):
-                            classification = results.multi_handedness[i].classification[0]
-                            h_score = classification.score
-                            h_label = classification.label
-
-                        hx = [lm.x for lm in hl.landmark]
-                        hy = [lm.y for lm in hl.landmark]
-                        min_x, max_x = min(hx), max(hx)
-                        min_y, max_y = min(hy), max(hy)
-                        box_w = max_x - min_x
-                        box_h = max_y - min_y
-                        area = box_w * box_h
-
-                        # Reject wall textures, shadows, and low-confidence phantom hands
-                        if h_score >= 0.58 and area >= 0.012 and 0.20 <= (box_w / (box_h + 1e-4)) <= 5.0:
-                            valid_hands.append({
-                                'landmarks': hl,
-                                'score': h_score,
-                                'label': h_label,
-                                'area': area,
-                                'min_x': min_x, 'max_x': max_x,
-                                'min_y': min_y, 'max_y': max_y
-                            })
-
-                if valid_hands:
-                    # Check for Lionel Messi celebration: BOTH hands pointing upward to the sky
-                    is_messi = False
-                    if len(valid_hands) >= 2:
-                        h1 = valid_hands[0]['landmarks']
-                        h2 = valid_hands[1]['landmarks']
-
-                        # Verify the two hands are physically distinct, separated hands across screen
-                        w1_x = h1.landmark[0].x
-                        w2_x = h2.landmark[0].x
-                        t1_x = h1.landmark[8].x
-                        t2_x = h2.landmark[8].x
-
-                        hands_separated = (abs(w1_x - w2_x) >= 0.18) or (abs(t1_x - t2_x) >= 0.16)
-
-                        if hands_separated and is_hand_pointing_up(h1) and is_hand_pointing_up(h2):
-                            is_messi = True
-
-                    if is_messi:
-                        self.prediction_history.clear()
-                        gold_color = (0, 215, 255)  # BGR: Golden Yellow for the GOAT
-
-                        # Draw landmarks and gold bounding boxes on both hands
-                        for vh in valid_hands[:2]:
-                            hl = vh['landmarks']
-                            self.mp_drawing.draw_landmarks(
-                                frame,
-                                hl,
-                                self.mp_hands.HAND_CONNECTIONS,
-                                self.mp_drawing_styles.get_default_hand_landmarks_style(),
-                                self.mp_drawing_styles.get_default_hand_connections_style()
-                            )
-                            hx = [lm.x for lm in hl.landmark]
-                            hy = [lm.y for lm in hl.landmark]
-                            bx1 = max(0, int(min(hx) * W) - 15)
-                            by1 = max(0, int(min(hy) * H) - 15)
-                            bx2 = min(W, int(max(hx) * W) + 15)
-                            by2 = min(H, int(max(hy) * H) + 15)
-                            cv2.rectangle(frame, (bx1, by1), (bx2, by2), gold_color, 3)
-                            cv2.putText(
-                                frame,
-                                "Lional Messi - The GOAT (99.0%)",
-                                (bx1, max(30, by1 - 10)),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                0.65,
-                                gold_color,
-                                2,
-                                cv2.LINE_AA
-                            )
-
-                        # Draw celebration banner at the top of the video
-                        banner_w = 420
-                        bx_start = max(0, (W - banner_w) // 2)
-                        cv2.rectangle(frame, (bx_start, 10), (bx_start + banner_w, 55), (0, 140, 255), -1)
-                        cv2.putText(
-                            frame,
-                            "LIONAL MESSI - THE GOAT",
-                            (bx_start + 25, 43),
-                            cv2.FONT_HERSHEY_DUPLEX,
-                            0.90,
-                            (255, 255, 255),
-                            2,
-                            cv2.LINE_AA
-                        )
-
-                        detected_signs.append({
-                            "text": "lional messi-the goat🐐",
-                            "confidence": 99.0,
-                            "class_id": 33,
-                            "bbox": (0, 0, W, H)
-                        })
-                    else:
-                        # Single-hand signs (A-Z and 7 words) evaluated with the 100% accurate ML model
-                        # Select ONLY the primary hand (largest area and highest detection score)
-                        primary_vh = max(valid_hands, key=lambda item: (item['area'], item['score']))
-                        primary_hl = primary_vh['landmarks']
-
-                        # Draw landmarks ONLY for the real primary hand
-                        self.mp_drawing.draw_landmarks(
-                            frame,
-                            primary_hl,
-                            self.mp_hands.HAND_CONNECTIONS,
-                            self.mp_drawing_styles.get_default_hand_landmarks_style(),
-                            self.mp_drawing_styles.get_default_hand_connections_style()
-                        )
-
-                        min_x, max_x = primary_vh['min_x'], primary_vh['max_x']
-                        min_y, max_y = primary_vh['min_y'], primary_vh['max_y']
-                        
-                        scale = max(max_x - min_x, max_y - min_y)
-                        if scale < 1e-4:
-                            scale = 1.0
-
-                        data_aux = []
-                        for lm in primary_hl.landmark:
-                            data_aux.append((lm.x - min_x) / scale)
-                            data_aux.append((lm.y - min_y) / scale)
-
-                        x1 = max(0, int(min_x * W) - 15)
-                        y1 = max(0, int(min_y * H) - 15)
-                        x2 = min(W, int(max_x * W) + 15)
-                        y2 = min(H, int(max_y * H) + 15)
-
-                        if model is not None and len(data_aux) == 42:
-                            try:
-                                data_aux_mirr = mirror_features(data_aux)
-                                feat_orig = np.asarray(data_aux, dtype=np.float32).reshape(1, -1)
-                                feat_mirr = np.asarray(data_aux_mirr, dtype=np.float32).reshape(1, -1)
-
-                                # Batched vectorized prediction: 2x faster than 2 separate predict_proba calls
-                                probs = model.predict_proba(np.vstack([feat_orig, feat_mirr]))
-                                prob_orig = probs[0]
-                                prob_mirr = probs[1]
-
-                                # Dual chirality: select canonical representation matching user's active hand
-                                if np.max(prob_mirr) > np.max(prob_orig):
-                                    active_feat = data_aux_mirr
-                                else:
-                                    active_feat = data_aux
-
-                                # Dual-chirality combined probability pooling
-                                combined_proba = np.maximum(prob_orig, prob_mirr)
-                                self.prediction_history.append(combined_proba)
-
-                                # 4-frame moving average for rock-solid stability and zero jitter
-                                smoothed_proba = np.mean(self.prediction_history, axis=0)
-                                best_idx = int(np.argmax(smoothed_proba))
-                                class_id = int(str(model.classes_[best_idx]))
-                                confidence = float(smoothed_proba[best_idx])
-
-                                # Targeted disambiguation (prevents D when R is shown, resolves D vs Z, R vs U/V, J vs I)
-                                class_id, confidence = targeted_disambiguation(class_id, confidence, active_feat)
-                                predicted_char = LABELS_DICT.get(class_id, None)
-
-                                if predicted_char is not None and confidence >= 0.40:
-                                    detected_signs.append({
-                                        "text": predicted_char,
-                                        "confidence": round(confidence * 100, 1),
-                                        "class_id": class_id,
-                                        "bbox": (x1, y1, x2, y2)
-                                    })
-
-                                    box_color = (46, 204, 113) if confidence >= 0.65 else (52, 152, 219)
-                                    cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-                                    
-                                    label_text = f"{predicted_char} ({confidence * 100:.1f}%)"
-                                    (txt_w, txt_h), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-                                    tag_y1 = max(0, y1 - txt_h - 12)
-                                    tag_y2 = y1
-                                    cv2.rectangle(frame, (x1, tag_y1), (x1 + txt_w + 16, tag_y2), box_color, -1)
-                                    cv2.putText(
-                                        frame,
-                                        label_text,
-                                        (x1 + 8, max(txt_h + 4, tag_y2 - 6)),
-                                        cv2.FONT_HERSHEY_SIMPLEX,
-                                        0.65,
-                                        (0, 0, 0),
-                                        2,
-                                        cv2.LINE_AA
-                                    )
-                            except Exception:
-                                pass
-                else:
-                    self.prediction_history.clear()
+                # Process hand landmarks & ML gesture classification
+                pred = analyze_frame(frame, self.hands, self.prediction_history, draw_on_frame=True)
 
                 # Broadcast and store latest prediction (rate-limited every ~50ms)
                 now = time.time()
                 if now - self.last_emit_time > 0.05:
-                    if detected_signs:
-                        top_sign = max(detected_signs, key=lambda s: s["confidence"])
-                        pred_data = {
-                            'text': top_sign['text'],
-                            'confidence': top_sign['confidence'],
-                            'class_id': top_sign['class_id'],
-                            'detected': True,
-                            'timestamp': now
-                        }
-                    else:
-                        pred_data = {
-                            'text': '',
-                            'confidence': 0.0,
-                            'class_id': -1,
-                            'detected': False,
-                            'timestamp': now
-                        }
-                    
+                    pred_data = {
+                        'text': pred['text'],
+                        'confidence': pred['confidence'],
+                        'class_id': pred['class_id'],
+                        'detected': pred['detected'],
+                        'timestamp': now
+                    }
                     with self.lock:
                         self.latest_prediction = pred_data
-                    
                     socketio.emit('prediction', pred_data)
                     self.last_emit_time = now
 
-                # Encode frame to JPEG (quality 60 reduces payload size by ~45%, preventing tunnel network lag)
-                ret_encode, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                # Encode downscaled frame to JPEG (480x360 at quality 50 = ~4.7 KB, 85% bandwidth reduction!)
+                stream_frame = cv2.resize(frame, (480, 360), interpolation=cv2.INTER_AREA)
+                ret_encode, buffer = cv2.imencode('.jpg', stream_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
                 if ret_encode:
                     self.latest_frame = buffer.tobytes()
 
@@ -754,9 +763,88 @@ def handle_connect():
     })
 
 
+client_histories = {}
+client_histories_lock = threading.Lock()
+device_hands = None
+device_hands_lock = threading.Lock()
+
+
+def get_device_hands():
+    global device_hands
+    if device_hands is None:
+        device_hands = mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            model_complexity=0,
+            min_detection_confidence=0.40,
+            min_tracking_confidence=0.40
+        )
+    return device_hands
+
+
+@socketio.on('device_frame')
+def handle_device_frame(data):
+    """Processes real-time video frames sent directly from client devices (phone/browser)."""
+    try:
+        img_str = data.get('image', '')
+        if not img_str:
+            return
+        if ',' in img_str:
+            img_str = img_str.split(',', 1)[1]
+        raw_bytes = base64.b64decode(img_str)
+        np_arr = np.frombuffer(raw_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return
+
+        sid = getattr(request, 'sid', 'default')
+        with client_histories_lock:
+            if sid not in client_histories:
+                client_histories[sid] = deque(maxlen=4)
+            history = client_histories[sid]
+
+        with device_hands_lock:
+            detector = get_device_hands()
+            result = analyze_frame(frame, detector, history_deque=history, draw_on_frame=False)
+
+        result['timestamp'] = time.time()
+        emit('device_prediction', result)
+    except Exception as e:
+        print(f"[WARN] Error in device_frame: {e}")
+
+
 @socketio.on('disconnect')
 def handle_disconnect():
-    pass
+    sid = getattr(request, 'sid', None)
+    if sid:
+        with client_histories_lock:
+            client_histories.pop(sid, None)
+
+
+@app.route('/api/predict_frame', methods=['POST'])
+def api_predict_frame():
+    """HTTP POST fallback for device frame prediction."""
+    try:
+        data = request.get_json(silent=True) or {}
+        img_str = data.get('image', '')
+        if not img_str:
+            return jsonify({'detected': False, 'error': 'No image'})
+        if ',' in img_str:
+            img_str = img_str.split(',', 1)[1]
+        raw_bytes = base64.b64decode(img_str)
+        np_arr = np.frombuffer(raw_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return jsonify({'detected': False, 'error': 'Decode failed'})
+
+        with device_hands_lock:
+            detector = get_device_hands()
+            result = analyze_frame(frame, detector, history_deque=None, draw_on_frame=False)
+
+        result['timestamp'] = time.time()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'detected': False, 'error': str(e)})
 
 
 @socketio.on('toggle_camera')
@@ -777,7 +865,7 @@ def generate_frames():
                 last_frame_bytes = frame
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            time.sleep(0.015)
+            time.sleep(0.045)
     except (GeneratorExit, ConnectionResetError, BrokenPipeError):
         pass
 
