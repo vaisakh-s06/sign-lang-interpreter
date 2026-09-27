@@ -41,9 +41,14 @@ pip install -r requirements.txt
 # Running the App
 
 ```bash
+# Using the prepared virtual environment
+.\venv\Scripts\python.exe app.py
+
+# Or activate venv and run
+venv\Scripts\activate
 python app.py
-#use ver 3.13.2
 ```
+*Note: Recommended Python version is Python 3.11 (64-bit).*
 
 # License
 

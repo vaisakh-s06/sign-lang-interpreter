@@ -1,0 +1,17 @@
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large binary tools
+scratch/cloudflared.exe
+*.exe
+
+# System & IDE files
+.DS_Store
+Thumbs.db

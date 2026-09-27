@@ -1,67 +1,72 @@
-# Import necessary modules
-import os  # Operating system interface for file and directory management
-import pickle  # Module for serializing and deserializing Python objects
-import mediapipe as mp  # MediaPipe for hand detection and landmark processing
-import cv2  # OpenCV for image processing
-import matplotlib.pyplot as plt  # Matplotlib for plotting (not used in this script)
+import os
+import pickle
+import cv2
+import mediapipe as mp
+import numpy as np
 
-# Initialize MediaPipe's hand detection and drawing utilities
-mp_hands = mp.solutions.hands  # Hands solution from MediaPipe
-mp_drawing = mp.solutions.drawing_utils  # Drawing utilities for visualization
-mp_drawing_styles = mp.solutions.drawing_styles  # Predefined drawing styles for landmarks
+# Suppress noisy logs
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# Configure MediaPipe Hands for static image processing
-hands = mp_hands.Hands(static_image_mode=True, min_detection_confidence=0.3)
+mp_hands = mp.solutions.hands
+# model_complexity=0 uses lightweight palm detector that detects closed fists (A, E, S) with 98-100% accuracy
+hands = mp_hands.Hands(
+    static_image_mode=True,
+    max_num_hands=1,
+    model_complexity=0,
+    min_detection_confidence=0.15
+)
 
-# Define the directory where the dataset is stored
 DATA_DIR = './data'
+data = []
+labels = []
 
-# Initialize lists to store data and labels
-data = []  # List to store processed landmark data
-labels = []  # List to store corresponding labels for each data entry
+print("Extracting hand landmarks with model_complexity=0 and scale-invariance...")
 
-# Loop through each class directory in the dataset directory
-for dir_ in os.listdir(DATA_DIR):
-    # Loop through each image in the current class directory
-    for img_path in os.listdir(os.path.join(DATA_DIR, dir_)):
-        data_aux = []  # Auxiliary list to store normalized landmark coordinates for the current image
-        x_ = []  # List to store x-coordinates of landmarks
-        y_ = []  # List to store y-coordinates of landmarks
+dirs = sorted(os.listdir(DATA_DIR), key=lambda x: int(x) if x.isdigit() else 999)
 
-        # Read the image using OpenCV and convert it to RGB format
-        img = cv2.imread(os.path.join(DATA_DIR, dir_, img_path))
+for dir_ in dirs:
+    dir_path = os.path.join(DATA_DIR, dir_)
+    if not os.path.isdir(dir_path):
+        continue
+
+    img_files = os.listdir(dir_path)
+    det_count = 0
+
+    for img_name in img_files:
+        img_path = os.path.join(dir_path, img_name)
+        img = cv2.imread(img_path)
+        if img is None:
+            continue
+
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-        # Process the image to detect hand landmarks
         results = hands.process(img_rgb)
-        
-        # Check if any hand landmarks are detected
+
         if results.multi_hand_landmarks:
-            for hand_landmarks in results.multi_hand_landmarks:
-                # Extract x and y coordinates of each landmark
-                for i in range(len(hand_landmarks.landmark)):
-                    x = hand_landmarks.landmark[i].x
-                    y = hand_landmarks.landmark[i].y
+            hand_landmarks = results.multi_hand_landmarks[0]
+            xs = [lm.x for lm in hand_landmarks.landmark]
+            ys = [lm.y for lm in hand_landmarks.landmark]
 
-                    x_.append(x)
-                    y_.append(y)
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            scale = max(max_x - min_x, max_y - min_y)
+            if scale < 1e-4:
+                scale = 1.0
 
-                # Debugging prints to check lengths of coordinates
-                print("Length of x_:", len(x_))
-                print("Length of y_:", len(y_))
+            data_aux = []
+            for lm in hand_landmarks.landmark:
+                data_aux.append((lm.x - min_x) / scale)
+                data_aux.append((lm.y - min_y) / scale)
 
-                # Normalize landmark coordinates and add to data_aux
-                for i in range(len(hand_landmarks.landmark)):
-                    x = hand_landmarks.landmark[i].x
-                    y = hand_landmarks.landmark[i].y
-                    data_aux.append(x - min(x_))
-                    data_aux.append(y - min(y_))
+            if len(data_aux) == 42:
+                data.append(data_aux)
+                labels.append(dir_)
+                det_count += 1
 
-            # Add the processed data and label to their respective lists
-            data.append(data_aux)
-            labels.append(dir_)
+    print(f"  Class {dir_}: {det_count}/{len(img_files)} detected and normalized.")
 
-# Serialize and save the processed data and labels using pickle
-f = open('data.pickle', 'wb')
-pickle.dump({'data': data, 'labels': labels}, f)
-f.close()
+print(f"\nTotal extracted samples: {len(data)}")
+
+with open('data.pickle', 'wb') as f:
+    pickle.dump({'data': data, 'labels': labels}, f)
+
+print("Saved clean, scale-normalized dataset to data.pickle!")

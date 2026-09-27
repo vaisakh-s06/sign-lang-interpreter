@@ -14,8 +14,10 @@ if not os.path.exists(DATA_DIR):
 number_of_classes = 33
 dataset_size = 100
 
-# Initialize video capture from the default camera (index 0)
-cap = cv2.VideoCapture(0)
+# Initialize video capture with DirectShow fallback on Windows
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+if not cap.isOpened():
+    cap = cv2.VideoCapture(0)
 
 # Loop through each class to collect data
 for j in range(number_of_classes):
@@ -29,6 +31,8 @@ for j in range(number_of_classes):
     # Wait for user readiness to start data collection
     while True:
         ret, frame = cap.read()  # Capture a frame from the video feed
+        if not ret or frame is None:
+            continue
         # Display instructions on the video feed
         cv2.putText(frame, 'Ready? Press "Q" ! :)', (100, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 0), 3, cv2.LINE_AA)
         cv2.imshow('frame', frame)  # Show the frame in a window
@@ -41,6 +45,8 @@ for j in range(number_of_classes):
     counter = 0
     while counter < dataset_size:
         ret, frame = cap.read()  # Capture a frame from the video feed
+        if not ret or frame is None:
+            continue
         print("Captured frame shape:", frame.shape)  # Print frame shape for debugging
         cv2.imshow('frame', frame)  # Show the frame in a window
         cv2.waitKey(25)  # Wait for 25 milliseconds between frames

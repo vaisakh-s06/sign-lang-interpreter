@@ -2,205 +2,2261 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Sign2Text</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Sign Language Interpreter | Real-Time Optical Recognition</title>
     
     <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&family=Raleway:wght@600;800&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     
-    <!-- Bootstrap & Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
+    <!-- Socket.IO Client (Local + CDN fallback) -->
+    <script src="/static/js/socket.io.min.js"></script>
+    <script>
+        if (typeof io === 'undefined') {
+            document.write('<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"><\/script>');
+        }
+    </script>
+
     <style>
-        body, html {
+        :root {
+            --bg-primary: #07090e;
+            --bg-secondary: #0d121d;
+            --bg-card: rgba(17, 24, 39, 0.75);
+            --bg-glass: rgba(255, 255, 255, 0.04);
+            --border-glass: rgba(255, 255, 255, 0.08);
+            --border-glow: rgba(99, 102, 241, 0.35);
+            --accent-primary: #6366f1;
+            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+            --accent-cyan: #06b6d4;
+            --accent-emerald: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-danger: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-sub: #64748b;
+            --radius-lg: 18px;
+            --radius-md: 12px;
+            --shadow-glow: 0 0 35px rgba(99, 102, 241, 0.18);
+        }
+
+        * {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            min-height: 100vh;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+            line-height: 1.6;
+        }
+
+        /* Ambient background glow */
+        .ambient-glow-1 {
+            position: fixed;
+            top: -150px;
+            left: 25%;
+            width: 550px;
+            height: 550px;
+            background: radial-gradient(circle, rgba(99, 102, 241, 0.12) 0%, transparent 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 0;
+            filter: blur(80px);
+        }
+
+        .ambient-glow-2 {
+            position: fixed;
+            bottom: -150px;
+            right: 15%;
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, rgba(6, 182, 212, 0.1) 0%, transparent 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 0;
+            filter: blur(80px);
+        }
+
+        /* Top Header */
+        header.top-header {
+            position: sticky;
+            top: 0;
+            width: 100%;
+            background: rgba(7, 9, 14, 0.88);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-glass);
+            z-index: 100;
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand-box {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-logo-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            box-shadow: 0 4px 18px rgba(99, 102, 241, 0.4);
+            color: #fff;
+        }
+
+        .brand-titles h1 {
+            font-size: 1.35rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(120deg, #ffffff 40%, #c7d2fe 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-titles span {
+            font-size: 0.72rem;
+            color: var(--accent-cyan);
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+
+        .header-status-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--accent-emerald);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--accent-emerald);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--accent-emerald);
+            animation: pulse 1.8s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1.1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        /* App Layout Container with Left Sidebar */
+        .app-layout {
+            display: flex;
+            flex: 1;
+            position: relative;
+            z-index: 1;
+            max-width: 1540px;
+            margin: 0 auto;
+            width: 100%;
+            padding: 24px;
+            gap: 24px;
+        }
+
+        @media (max-width: 900px) {
+            .app-layout {
+                flex-direction: column;
+                padding: 16px;
+            }
+        }
+
+        /* Left Sidebar Navigation */
+        aside.left-sidebar {
+            width: 250px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        @media (max-width: 900px) {
+            aside.left-sidebar {
+                width: 100%;
+                flex-direction: row;
+                overflow-x: auto;
+                padding-bottom: 6px;
+            }
+        }
+
+        .sidebar-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        @media (max-width: 900px) {
+            .sidebar-card {
+                flex-direction: row;
+                width: 100%;
+                justify-content: space-around;
+            }
+        }
+
+        .sidebar-btn {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 18px;
+            border-radius: var(--radius-md);
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.22s ease;
+            text-align: left;
+            width: 100%;
+        }
+
+        .sidebar-btn i {
+            font-size: 1.25rem;
+            width: 26px;
+            text-align: center;
+            transition: transform 0.2s ease;
+        }
+
+        .sidebar-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--border-glass);
+        }
+
+        .sidebar-btn:hover i {
+            transform: scale(1.15);
+        }
+
+        .sidebar-btn.active {
+            background: var(--accent-gradient);
+            color: #fff;
+            box-shadow: 0 4px 18px rgba(99, 102, 241, 0.4);
+            border-color: transparent;
+        }
+
+        .sidebar-badge {
+            margin-left: auto;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            font-size: 0.72rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: 700;
+        }
+
+        /* Sidebar Info Card */
+        .sidebar-guide-callout {
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid rgba(99, 102, 241, 0.25);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            margin-top: 10px;
+        }
+
+        .callout-title {
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #c7d2fe;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+
+        .callout-text {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            line-height: 1.45;
+        }
+
+        /* Main View Container */
+        main.main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .view-section {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .view-section.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Workspace Grid (Video + Translator) */
+        .workspace-grid {
+            display: grid;
+            grid-template-columns: 1.35fr 1fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 1100px) {
+            .workspace-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Glassmorphic Panel Cards */
+        .glass-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        }
+
+        .card-header {
+            padding: 16px 22px;
+            border-bottom: 1px solid var(--border-glass);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .card-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1rem;
+            font-weight: 700;
+            color: #f1f5f9;
+        }
+
+        .card-title i {
+            color: var(--accent-primary);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Video Feed Viewport */
+        .video-viewport {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4/3;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        #videoFeed {
             width: 100%;
             height: 100%;
-            font-family: 'Open Sans', sans-serif;
-            scroll-behavior: smooth;
-            background-color: #111;
-            color: #fff;
-            overflow-x: hidden;
+            object-fit: cover;
+            display: none;
         }
-        
-        /* Sidebar Navigation */
-        .sidebar {
-            width: 80px;
-            height: 100vh;
-            background: rgba(0, 0, 0, 0.9); /* Solid background to prevent blur */
-            position: fixed;
-            top: 0;
-            left: 0;
+
+        /* Camera Standby Screen */
+        .camera-standby-overlay {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at center, rgba(17, 24, 39, 0.97) 0%, rgba(7, 9, 14, 0.99) 100%);
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding-top: 20px;
-            z-index: 1000; /* Ensure sidebar stays above everything */
-        }
-        .sidebar a {
-            color: #fff;
-            text-decoration: none;
-            font-size: 24px;
-            margin: 20px 0;
-            transition: 0.3s;
-        }
-        .sidebar a:hover {
-            color: #f39c12;
-        }
-        
-        /* Hero Section */
-        .hero {
-            height: 100vh;
-            display: flex;
             justify-content: center;
-            align-items: center;
+            padding: 36px 24px;
             text-align: center;
-            font-size: 3rem;
-            font-weight: bold;
-            background-image: url('sign language.jpg'); /* Replace with your image */
-            background-size: cover;
-            background-position: center;
-            width: 100%;
-            padding-left: 80px;
-            position: relative;
+            z-index: 20;
+            transition: all 0.3s ease;
         }
-        .hero::before {
-            content: "";
+
+        .camera-standby-overlay.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .standby-icon-ring {
+            width: 86px;
+            height: 86px;
+            border-radius: 50%;
+            background: rgba(99, 102, 241, 0.12);
+            border: 2px dashed rgba(99, 102, 241, 0.45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 34px;
+            color: #a5b4fc;
+            margin-bottom: 20px;
+            box-shadow: 0 0 35px rgba(99, 102, 241, 0.2);
+            animation: pulse-ring 3s infinite ease-in-out;
+        }
+
+        @keyframes pulse-ring {
+            0%, 100% { transform: scale(1); border-color: rgba(99, 102, 241, 0.45); }
+            50% { transform: scale(1.06); border-color: rgba(168, 85, 247, 0.8); box-shadow: 0 0 30px rgba(168, 85, 247, 0.4); }
+        }
+
+        .standby-title {
+            font-size: 1.4rem;
+            font-weight: 800;
+            color: #fff;
+            margin-bottom: 8px;
+            letter-spacing: -0.3px;
+        }
+
+        .standby-desc {
+            font-size: 0.92rem;
+            color: var(--text-muted);
+            max-width: 440px;
+            margin-bottom: 24px;
+            line-height: 1.55;
+        }
+
+        .btn-camera-power {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 34px;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            border: none;
+            background: var(--accent-gradient);
+            color: #fff;
+            box-shadow: 0 4px 22px rgba(99, 102, 241, 0.45);
+            transition: all 0.25s ease;
+        }
+
+        .btn-camera-power:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 28px rgba(99, 102, 241, 0.65);
+            filter: brightness(1.1);
+        }
+
+        .btn-camera-power:active {
+            transform: translateY(1px);
+        }
+
+        /* Overlay HUD */
+        .hud-overlay {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            right: 16px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .hud-badge {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 6px 14px;
+            border-radius: 30px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .hud-badge.active {
+            color: var(--accent-cyan);
+            border-color: rgba(6, 182, 212, 0.4);
+        }
+
+        /* Bottom HUD banner with current sign */
+        .hud-bottom-bar {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            right: 16px;
+            background: rgba(13, 18, 29, 0.88);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-glow);
+            border-radius: var(--radius-md);
+            padding: 12px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+        }
+
+        .detected-sign-preview {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .sign-letter-box {
+            min-width: 50px;
+            height: 50px;
+            padding: 0 10px;
+            border-radius: 12px;
+            background: var(--accent-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.7rem;
+            font-weight: 800;
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.45);
+        }
+
+        .sign-meta-info {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sign-label-title {
+            font-size: 0.7rem;
+            color: var(--text-sub);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 700;
+        }
+
+        .sign-full-name {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: #fff;
+        }
+
+        .confidence-container {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            min-width: 120px;
+        }
+
+        .confidence-text {
+            font-size: 0.88rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent-cyan);
+            margin-bottom: 4px;
+        }
+
+        .confidence-bar-bg {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .confidence-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #6366f1, #06b6d4);
+            border-radius: 4px;
+            transition: width 0.15s ease, background 0.2s ease;
+        }
+
+        /* Action Toolbar */
+        .actions-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 16px 20px;
+            border-top: 1px solid var(--border-glass);
+            background: rgba(0, 0, 0, 0.15);
+        }
+
+        .btn-action {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 18px;
+            border-radius: 10px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid var(--border-glass);
+            background: rgba(255, 255, 255, 0.05);
+            color: #e2e8f0;
+            transition: all 0.2s ease;
+        }
+
+        .btn-action:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            transform: translateY(-1px);
+        }
+
+        .btn-action.btn-primary {
+            background: var(--accent-gradient);
+            border: none;
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.35);
+        }
+
+        .btn-action.btn-danger {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+
+        .btn-action.btn-danger:hover {
+            background: rgba(239, 68, 68, 0.25);
+            color: #fee2e2;
+        }
+
+        /* Transcription Box */
+        .transcription-area {
+            padding: 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .sentence-box {
+            min-height: 180px;
+            width: 100%;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-md);
+            padding: 18px;
+            font-size: 1.35rem;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-weight: 600;
+            color: #f8fafc;
+            line-height: 1.5;
+            resize: vertical;
+            outline: none;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .sentence-box:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.35);
+        }
+
+        .sentence-box::placeholder {
+            color: var(--text-sub);
+            font-style: italic;
+            font-size: 0.95rem;
+            font-weight: 400;
+        }
+
+        /* Live Real-Time Sign Status Bar */
+        .live-sign-status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid rgba(99, 102, 241, 0.25);
+            border-radius: var(--radius-md);
+            gap: 12px;
+        }
+
+        .live-sign-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .live-pulse-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--text-sub);
+            transition: all 0.2s ease;
+        }
+
+        .live-pulse-dot.active {
+            background-color: var(--accent-emerald);
+            box-shadow: 0 0 10px var(--accent-emerald);
+            animation: pulse 1.5s infinite;
+        }
+
+        .live-sign-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .live-sign-badge {
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: #fff;
+            background: var(--accent-gradient);
+            padding: 2px 14px;
+            border-radius: 8px;
+            min-width: 40px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.35);
+        }
+
+        .live-sign-conf {
+            font-size: 0.82rem;
+            color: var(--accent-cyan);
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+        }
+
+        .auto-hold-meter-bg {
+            width: 100%;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: -6px;
+        }
+
+        .auto-hold-meter-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #6366f1, #10b981);
+            transition: width 0.04s linear;
+        }
+
+        /* Sign into Text Stats Bar */
+        .text-stats-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-md);
+            font-size: 0.82rem;
+        }
+
+        .text-stat-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stat-label {
+            color: var(--text-sub);
+            font-weight: 500;
+        }
+
+        .stat-value {
+            color: var(--accent-cyan);
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Chips Container */
+        .chips-container {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+
+        .sign-chip {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-glass);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #cbd5e1;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .sign-chip .chip-conf {
+            color: var(--accent-cyan);
+            font-size: 0.72rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* User Manual Section */
+        .manual-container {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .manual-hero {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(168, 85, 247, 0.08) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: var(--radius-lg);
+            padding: 28px;
+        }
+
+        .manual-hero h2 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+
+        .manual-hero p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            max-width: 750px;
+        }
+
+        /* Crucial Letters Spotlight (A, D, E) */
+        .letters-spotlight-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 18px;
+            margin-top: 16px;
+        }
+
+        .spotlight-card {
+            background: rgba(13, 18, 29, 0.8);
+            border: 1px solid var(--border-glow);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .spotlight-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .spotlight-badge {
+            width: 42px;
+            height: 42px;
+            border-radius: 10px;
+            background: var(--accent-gradient);
+            color: #fff;
+            font-size: 1.4rem;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .spotlight-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .spotlight-desc {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .spotlight-tip {
+            font-size: 0.78rem;
+            color: var(--accent-cyan);
+            background: rgba(6, 182, 212, 0.1);
+            border: 1px solid rgba(6, 182, 212, 0.25);
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+
+        /* Presentation Sequence & Official Words Section */
+        .presentation-banner {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(16, 185, 129, 0.12));
+            border: 1px solid rgba(99, 102, 241, 0.4);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            margin-bottom: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+        }
+
+        .presentation-banner-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .presentation-title-box h3 {
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .presentation-title-box p {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .presentation-sequence-track {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.45);
+            padding: 14px 18px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+
+        .sequence-chip {
+            padding: 8px 16px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-glass);
+            color: #fff;
+            font-weight: 800;
+            font-size: 1rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .sequence-chip:hover {
+            background: var(--accent-gradient);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+        }
+
+        .sequence-chip .chip-num {
+            font-size: 0.72rem;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: var(--accent-cyan);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .sequence-arrow {
+            color: var(--accent-cyan);
+            font-size: 0.9rem;
+        }
+
+
+
+        .official-words-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+            gap: 18px;
+            margin-top: 10px;
+        }
+
+        .official-word-card {
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid var(--border-glow);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .official-word-card::before {
+            content: '';
             position: absolute;
             top: 0;
             left: 0;
-            width: 100%;
+            width: 4px;
             height: 100%;
-            background: rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(5px);
-            z-index: 0;
+            background: var(--accent-gradient);
+            opacity: 0;
+            transition: opacity 0.2s ease;
         }
 
-        .hero h1 {
-    position: relative;
-    z-index: 1;
-    font-size: 4.5rem; /* Slightly smaller than before */
-    font-family: 'Poppins', sans-serif; /* Stylish and modern font */
-    font-weight: 700; /* Bold but not overly heavy */
-    letter-spacing: 3px; /* Adds a stylish spacing effect */
-    text-transform: uppercase; /* Makes the text look more powerful */
-    text-shadow: 3px 3px 8px rgba(255, 255, 255, 0.2), 0px 0px 15px rgba(35, 34, 32, 0.8); /* Soft glow effect */
-    color: #f8e9cf; /* A warm, inviting gold color */
-}
+        .official-word-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--accent-primary);
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.3);
+            background: rgba(22, 33, 62, 0.95);
+        }
 
+        .official-word-card:hover::before {
+            opacity: 1;
+        }
 
-        
-        /* Video Section */
-        .video-section {
-            height: 100vh;
+        .word-card-top {
             display: flex;
-            justify-content: center;
             align-items: center;
-            width: 100%;
-            padding-left: 80px;
+            justify-content: space-between;
         }
-        #videoFeed {
-            width: 80%;
-            height: auto;
-            border-radius: 10px;
+
+        .word-badge {
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: #fff;
+            background: var(--accent-gradient);
+            padding: 4px 16px;
+            border-radius: 8px;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.35);
         }
-        
-        /* Fullscreen Image Gallery */
-        .gallery-container {
-            position: relative;
-            width: 100%;
-            height: 100vh;
+
+        .word-gesture-name {
+            font-size: 0.8rem;
+            color: var(--accent-emerald);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: rgba(16, 185, 129, 0.12);
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+
+        .word-desc {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .word-action-hint {
+            font-size: 0.8rem;
+            color: var(--accent-cyan);
             display: flex;
-            justify-content: center;
             align-items: center;
-            padding-left: 80px;
+            gap: 6px;
+            margin-top: auto;
+            font-weight: 600;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
         }
-        .gallery-image {
-            width: 90%;
-            height: 90vh;
-            object-fit: cover;
-            border-radius: 10px;
-            display: none;
+
+        /* Visual Charts Grid */
+        .manual-images-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
         }
-        .gallery-image.active {
-            display: block;
+
+        @media (max-width: 900px) {
+            .manual-images-grid {
+                grid-template-columns: 1fr;
+            }
         }
-        /* Navigation Arrows */
-        .gallery-nav {
-            position: absolute;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 2rem;
-            color: white;
+
+        .manual-image-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+
+        .manual-img-wrap {
+            width: 100%;
+            height: 380px;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            padding: 12px;
+        }
+
+        .manual-img-wrap img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+
+        .manual-img-footer {
+            padding: 16px 20px;
+            border-top: 1px solid var(--border-glass);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* 33 Signs Catalog Grid */
+        .signs-catalog-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .catalog-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-glass);
+            border-radius: 12px;
+            padding: 12px 10px;
+            text-align: center;
+            transition: all 0.2s ease;
             cursor: pointer;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 10px;
-            border-radius: 5px;
         }
-        .prev {
-            left: 5%;
+
+        .catalog-card:hover {
+            background: rgba(99, 102, 241, 0.15);
+            border-color: rgba(99, 102, 241, 0.4);
+            transform: translateY(-2px);
         }
-        .next {
-            right: 5%;
+
+        .catalog-letter {
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+
+        .catalog-id {
+            font-size: 0.7rem;
+            color: var(--text-sub);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Toast Popup */
+        .toast-msg {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-glow);
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .toast-msg.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        footer {
+            margin-top: auto;
+            border-top: 1px solid var(--border-glass);
+            padding: 20px;
+            text-align: center;
+            color: var(--text-sub);
+            font-size: 0.85rem;
         }
     </style>
 </head>
 <body>
-    <!-- Sidebar Navigation -->
-    <div class="sidebar">
-        <a href="#hero"><i class="fas fa-home"></i></a>
-        <a href="#video-section"><i class="fas fa-video"></i></a>
-        <a href="#gallery"><i class="fas fa-images"></i></a>
-    </div>
-    
-    <!-- Hero Section -->
-    <div id="hero" class="hero">
-        <h1>SIGN LANGUAGE INTERPRETER</h1>
-    </div>
-    
-    <!-- Video Feed Section -->
-    <div id="video-section" class="video-section">
-        <img id="videoFeed" src="http://localhost:5000/video_feed" alt="Live Video Feed">
-    </div>
-    
-    <!-- Fullscreen Image Gallery -->
-    <div id="gallery" class="gallery-container">
-        <div class="gallery-nav prev" onclick="prevImage()">&#10094;</div>
-        <img class="gallery-image active" src="image1.jpeg" alt="Image 1">
-        <img class="gallery-image" src="image2.jpeg" alt="Image 2">
-        <img class="gallery-image" src="image3.jpeg" alt="Image 3">
-        <div class="gallery-nav next" onclick="nextImage()">&#10095;</div>
+    <div class="ambient-glow-1"></div>
+    <div class="ambient-glow-2"></div>
+
+    <!-- Top Header / Name of the Project -->
+    <header class="top-header">
+        <div class="brand-box">
+            <div class="brand-logo-icon">
+                <i class="fa-solid fa-hands-asl-interpreting"></i>
+            </div>
+            <div class="brand-titles">
+                <h1>AI SIGN LANGUAGE INTERPRETER</h1>
+                <span>Real-Time Optical Gesture Classification</span>
+            </div>
+        </div>
+
+        <div class="header-status-pill">
+            <div class="pulse-dot"></div>
+            <span>33 Signs AI Model Ready</span>
+        </div>
+    </header>
+
+    <!-- App Layout Container -->
+    <div class="app-layout">
+        <!-- Left Sidebar Navigation -->
+        <aside class="left-sidebar">
+            <div class="sidebar-card">
+                <!-- Button 1: Video Interpreter -->
+                <button class="sidebar-btn active" id="btnNavVideo" data-view="view-video" title="Open Video Interpreter">
+                    <i class="fa-solid fa-video"></i>
+                    <span>Video Feed</span>
+                </button>
+
+                <!-- Button 2: Gesture Timeline -->
+                <button class="sidebar-btn" id="btnNavHistory" data-view="view-history" title="View Recent Sign Events">
+                    <i class="fa-solid fa-clock-rotate-left"></i>
+                    <span>Sign Timeline</span>
+                </button>
+
+                <!-- Button 3: User Manual -->
+                <button class="sidebar-btn" id="btnNavManual" data-view="view-manual" title="Open User Manual & Gesture Guide">
+                    <i class="fa-solid fa-book-open"></i>
+                    <span>User Manual</span>
+                    <span class="sidebar-badge">Guide</span>
+                </button>
+            </div>
+
+            <!-- Quick Start Hardware Note -->
+            <div class="sidebar-guide-callout">
+                <div class="callout-title">
+                    <i class="fa-solid fa-shield-halved"></i> Hardware Privacy
+                </div>
+                <div class="callout-text">
+                    The camera turns ON only when you click <b>"Turn Camera ON"</b> and turns OFF automatically when you stop or browse the manual.
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- VIEW 1: Video Interpreter Section -->
+            <div class="view-section active" id="view-video">
+                <div class="workspace-grid">
+                    <!-- Left: Camera Viewport Card -->
+                    <div class="glass-card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <i class="fa-solid fa-video"></i>
+                                <span>Optical Camera Feed</span>
+                            </div>
+                            <div class="header-actions">
+                                <button class="btn-action" id="headerCameraToggleBtn" title="Toggle camera ON or OFF">
+                                    <i class="fa-solid fa-video"></i> <span>Start Camera</span>
+                                </button>
+                                <div class="hud-badge" id="cameraStatusBadge">
+                                    <i class="fa-solid fa-circle" id="cameraStatusDot" style="color: var(--text-sub); font-size: 0.65rem;"></i>
+                                    <span id="cameraStatusText">Camera Off</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="video-viewport">
+                            <!-- Real-time Video Stream (Active only when camera is ON) -->
+                            <img id="videoFeed" src="" alt="Real-Time Sign Language Interpreter Video Feed">
+
+                            <!-- Standby Privacy Overlay (Active when camera is OFF) -->
+                            <div class="camera-standby-overlay" id="cameraStandbyOverlay">
+                                <div class="standby-icon-ring">
+                                    <i class="fa-solid fa-video-slash"></i>
+                                </div>
+                                <h3 class="standby-title">Camera Inactive</h3>
+                                <p class="standby-desc">
+                                    Camera hardware is currently disconnected. Click below to start the webcam and begin real-time gesture recognition.
+                                </p>
+                                <button class="btn-camera-power" id="standbyStartCameraBtn">
+                                    <i class="fa-solid fa-power-off"></i> Turn Camera ON
+                                </button>
+                            </div>
+
+                            <!-- HUD Top -->
+                            <div class="hud-overlay" id="hudOverlay" style="display: none;">
+                                <div class="hud-badge" id="trackingStatusBadge">
+                                    <i class="fa-solid fa-hand"></i>
+                                    <span id="trackingStatusText">Awaiting Hand...</span>
+                                </div>
+                                <div class="hud-badge" id="quickStopCamBtn" style="cursor: pointer; pointer-events: auto; background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;" title="Turn off webcam hardware">
+                                    <i class="fa-solid fa-stop"></i> Stop Camera
+                                </div>
+                            </div>
+
+                            <!-- HUD Bottom Bar -->
+                            <div class="hud-bottom-bar" id="hudBottomBar" style="display: none;">
+                                <div class="detected-sign-preview">
+                                    <div class="sign-letter-box" id="signLetterBox">-</div>
+                                    <div class="sign-meta-info">
+                                        <span class="sign-label-title">Detected Sign</span>
+                                        <span class="sign-full-name" id="signFullName">Position hand in camera</span>
+                                    </div>
+                                </div>
+
+                                <div class="confidence-container">
+                                    <span class="confidence-text" id="confidenceValue">0.0%</span>
+                                    <div class="confidence-bar-bg">
+                                        <div class="confidence-bar-fill" id="confidenceBar"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Video Card Bottom Toolbar -->
+                        <div class="actions-toolbar" style="justify-content: space-between;">
+                            <button class="btn-action" id="bottomCameraToggleBtn">
+                                <i class="fa-solid fa-power-off"></i> <span id="bottomCameraToggleText">Turn Camera ON</span>
+                            </button>
+                            <span style="font-size: 0.8rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+                                <i class="fa-solid fa-circle-info" style="color: var(--accent-cyan);"></i> Hold sign to type letter • Clear hand to repeat
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Right: Sign Language into Text -->
+                    <div class="glass-card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <i class="fa-solid fa-align-left" style="color: var(--accent-primary);"></i>
+                                <span>Sign Language into Text</span>
+                            </div>
+                            <div class="header-actions">
+                                <button class="btn-action" id="copyBtn" title="Copy translated text to clipboard">
+                                    <i class="fa-solid fa-copy"></i> <span>Copy Text</span>
+                                </button>
+                                <button class="btn-action btn-danger" id="clearBtn" title="Clear translated text">
+                                    <i class="fa-solid fa-trash-can"></i> <span>Clear</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="transcription-area">
+                            <!-- Live Real-Time Active Sign Status Bar -->
+                            <div class="live-sign-status-bar">
+                                <div class="live-sign-info">
+                                    <span class="live-pulse-dot" id="livePulseDot"></span>
+                                    <span class="live-sign-label">Detected Sign:</span>
+                                    <span class="live-sign-badge" id="liveSignBadge">-</span>
+                                    <span class="live-sign-conf" id="liveSignConf">(Waiting for hand)</span>
+                                </div>
+                                <button class="btn-action btn-primary" id="btnManualAddSign" title="Instantly insert current sign into text box">
+                                    <i class="fa-solid fa-plus"></i> <span>Add to Text</span>
+                                </button>
+                            </div>
+
+                            <!-- Auto-Add Hold Progress Bar -->
+                            <div class="auto-hold-meter-bg" title="Auto-commit hold progress">
+                                <div class="auto-hold-meter-fill" id="autoHoldMeter"></div>
+                            </div>
+
+                            <!-- Real-time Editable Text Box -->
+                            <textarea 
+                                class="sentence-box" 
+                                id="sentenceDisplay" 
+                                rows="6"
+                                placeholder="Recognized signs appear here in real-time, or you can click here to edit and type directly with your keyboard..."></textarea>
+
+                            <!-- Text Metadata & Stats Bar -->
+                            <div class="text-stats-bar">
+                                <div class="text-stat-item">
+                                    <span class="stat-label">Characters:</span>
+                                    <span class="stat-value" id="statCharCount">0</span>
+                                </div>
+                                <div class="text-stat-item">
+                                    <span class="stat-label">Words:</span>
+                                    <span class="stat-value" id="statWordCount">0</span>
+                                </div>
+                                <div class="text-stat-item">
+                                    <span class="stat-label">Latest Sign:</span>
+                                    <span class="stat-value" id="statLatestSign">-</span>
+                                </div>
+                            </div>
+
+                            <!-- Action Controls Toolbar -->
+                            <div class="actions-toolbar" style="border: none; padding: 0; background: transparent; justify-content: space-between;">
+                                <div style="display: flex; gap: 8px;">
+                                    <button class="btn-action" id="spaceBtn" title="Insert space between words">
+                                        <i class="fa-solid fa-square-full" style="font-size: 0.6rem;"></i> Space
+                                    </button>
+                                    <button class="btn-action" id="backspaceBtn" title="Delete last character">
+                                        <i class="fa-solid fa-delete-left"></i> Backspace
+                                    </button>
+                                </div>
+                                <button class="btn-action" id="toggleAutoAddBtn" title="Toggle automatic sign accumulation">
+                                    <i class="fa-solid fa-toggle-on" id="autoAddIcon"></i> Auto-Add: ON
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 2: Gesture Timeline Section -->
+            <div class="view-section" id="view-history">
+                <div class="glass-card" style="padding: 24px;">
+                    <div class="card-title" style="margin-bottom: 16px;">
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                        <span>Live Gesture Timeline</span>
+                        <span id="streamCount" style="font-size: 0.8rem; color: var(--accent-cyan); font-weight: 600; margin-left: auto;">0 events recorded</span>
+                    </div>
+                    <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 20px;">
+                        Every detected sign and its model confidence score are recorded sequentially here.
+                    </p>
+                    <div class="chips-container" id="chipsContainer" style="flex-wrap: wrap; gap: 10px;">
+                        <span class="sign-chip" style="color: var(--text-sub);">Timeline is waiting for gestures...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 3: User Manual Section -->
+            <div class="view-section" id="view-manual">
+                <div class="manual-container">
+                    <div class="manual-hero">
+                        <h2>User Manual & Gesture Guide</h2>
+                        <p>
+                            Learn how to position your fingers accurately for American Sign Language (ASL) alphabets and conversational words recognized by the AI model.
+                        </p>
+                    </div>
+
+                    <!-- Conversational Sign Phrases & Whole-Word Vocabulary -->
+                    <div class="presentation-banner" style="background: rgba(15, 23, 42, 0.6); border-color: var(--border-glass);">
+                        <div class="presentation-banner-top">
+                            <div class="presentation-title-box">
+                                <h3>
+                                    <i class="fa-solid fa-comments" style="color: var(--accent-emerald);"></i>
+                                    <span>Conversational Signs & Word Dictionary</span>
+                                </h3>
+                                <p>
+                                    In addition to ASL single-finger alphabets (A-Z), the interpreter model recognizes complete whole-word gestures:
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Detailed Action Cards for Conversational Signs -->
+                        <div class="official-words-grid">
+                            <!-- 1. Hello -->
+                            <div class="official-word-card" onclick="commitSign('Hello'); showToast('Inserted Hello');">
+                                <div class="word-card-top">
+                                    <div class="word-badge">Hello</div>
+                                    <span class="word-gesture-name">Open Palm Wave</span>
+                                </div>
+                                <div class="word-desc">
+                                    Raise your hand with palm facing the camera and all 5 fingers spread upright, waving gently side-to-side.
+                                </div>
+                                <div class="word-action-hint">
+                                    <i class="fa-solid fa-hand"></i> Friendly greeting sign
+                                </div>
+                            </div>
+
+                            <!-- 2. Done -->
+                            <div class="official-word-card" onclick="commitSign('Done'); showToast('Inserted Done');">
+                                <div class="word-card-top">
+                                    <div class="word-badge">Done</div>
+                                    <span class="word-gesture-name">Thumbs Up 👍</span>
+                                </div>
+                                <div class="word-desc">
+                                    Make a closed fist with your <b>thumb extended vertically straight UP</b>.
+                                </div>
+                                <div class="word-action-hint">
+                                    <i class="fa-solid fa-thumbs-up"></i> Completion / success sign
+                                </div>
+                            </div>
+
+                            <!-- 3. Thank You -->
+                            <div class="official-word-card" onclick="commitSign('Thank You'); showToast('Inserted Thank You');">
+                                <div class="word-card-top">
+                                    <div class="word-badge">Thank You</div>
+                                    <span class="word-gesture-name">Chin to Camera</span>
+                                </div>
+                                <div class="word-desc">
+                                    Start with your flat open hand touching your fingertips near your chin or mouth, and move it outward towards the camera.
+                                </div>
+                                <div class="word-action-hint">
+                                    <i class="fa-solid fa-sparkles"></i> Polite closing phrase
+                                </div>
+                            </div>
+
+                            <!-- 4. I Love you -->
+                            <div class="official-word-card" onclick="commitSign('I Love you'); showToast('Inserted I Love you');">
+                                <div class="word-card-top">
+                                    <div class="word-badge">I Love you</div>
+                                    <span class="word-gesture-name">🤟 Sign</span>
+                                </div>
+                                <div class="word-desc">
+                                    Extend your <b>Thumb, Index, and Pinky</b> fingers outward, while keeping your middle and ring fingers curled into the palm.
+                                </div>
+                                <div class="word-action-hint">
+                                    <i class="fa-solid fa-heart"></i> Universal ASL love sign
+                                </div>
+                            </div>
+
+                            <!-- 5. Sorry -->
+                            <div class="official-word-card" onclick="commitSign('Sorry'); showToast('Inserted Sorry');">
+                                <div class="word-card-top">
+                                    <div class="word-badge">Sorry</div>
+                                    <span class="word-gesture-name">Fist Over Chest ✊</span>
+                                </div>
+                                <div class="word-desc">
+                                    Make a closed fist and place it gently over the center of your <b>chest / heart area</b>.
+                                </div>
+                                <div class="word-action-hint">
+                                    <i class="fa-solid fa-hand-fist"></i> Apology gesture
+                                </div>
+                            </div>
+
+                            <!-- 6. Please -->
+                            <div class="official-word-card" onclick="commitSign('Please'); showToast('Inserted Please');">
+                                <div class="word-card-top">
+                                    <div class="word-badge">Please</div>
+                                    <span class="word-gesture-name">Pinched Fingertips 🤌</span>
+                                </div>
+                                <div class="word-desc">
+                                    Bunch all five fingertips (thumb and fingers) together pointing straight upward.
+                                </div>
+                                <div class="word-action-hint">
+                                    <i class="fa-solid fa-hand-holding-heart"></i> Courteous request sign
+                                </div>
+                            </div>
+
+                            <!-- 7. You are welcome -->
+                            <div class="official-word-card" onclick="commitSign('You are welcome.'); showToast('Inserted You are welcome.');">
+                                <div class="word-card-top">
+                                    <div class="word-badge">You are welcome</div>
+                                    <span class="word-gesture-name">Open Palm Upward 🫴</span>
+                                </div>
+                                <div class="word-desc">
+                                    Extend your hand outward at waist level with your <b>open palm facing upward</b> in a welcoming gesture.
+                                </div>
+                                <div class="word-action-hint">
+                                    <i class="fa-solid fa-hand-holding"></i> Courteous reply sign
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Critical Letters Spotlight: A, B, D, E -->
+                    <div class="glass-card" style="padding: 24px;">
+                        <div class="card-title" style="margin-bottom: 8px;">
+                            <i class="fa-solid fa-star" style="color: var(--accent-amber);"></i>
+                            <span>Key Letters Guide: How to Sign A, B, D, and E</span>
+                        </div>
+                        <p style="font-size: 0.9rem; color: var(--text-muted);">
+                            For highest recognition accuracy, position your hand clearly within the camera frame facing forward:
+                        </p>
+
+                        <div class="letters-spotlight-grid">
+                            <!-- Letter A -->
+                            <div class="spotlight-card">
+                                <div class="spotlight-header">
+                                    <div class="spotlight-badge">A</div>
+                                    <div class="spotlight-name">Letter 'A' (Fist)</div>
+                                </div>
+                                <div class="spotlight-desc">
+                                    Make a closed fist with all four fingers curled tightly. Keep your <b>thumb pointing straight upward</b> resting alongside the index finger.
+                                </div>
+                                <div class="spotlight-tip">
+                                    <i class="fa-solid fa-lightbulb"></i> Tip: Keep thumb resting alongside index finger (distinct from Thumbs Up for 'Done').
+                                </div>
+                            </div>
+
+                            <!-- Letter B -->
+                            <div class="spotlight-card">
+                                <div class="spotlight-header">
+                                    <div class="spotlight-badge">B</div>
+                                    <div class="spotlight-name">Letter 'B' (Flat Upright)</div>
+                                </div>
+                                <div class="spotlight-desc">
+                                    Hold all <b>four fingers pointing straight UP</b> pressed together, with your <b>thumb folded across your palm</b>.
+                                </div>
+                                <div class="spotlight-tip">
+                                    <i class="fa-solid fa-lightbulb"></i> Tip: Fold thumb across palm (distinct from open-hand 'Hello' where thumb is open).
+                                </div>
+                            </div>
+
+                            <!-- Letter D -->
+                            <div class="spotlight-card">
+                                <div class="spotlight-header">
+                                    <div class="spotlight-badge">D</div>
+                                    <div class="spotlight-name">Letter 'D' (Pointer Up)</div>
+                                </div>
+                                <div class="spotlight-desc">
+                                    Point your <b>index finger straight UP</b>. Touch the tips of your middle finger and thumb together to form an 'O' circle, with ring and pinky fingers curled.
+                                </div>
+                                <div class="spotlight-tip">
+                                    <i class="fa-solid fa-lightbulb"></i> Tip: Keep index finger vertical with thumb touching middle fingertip.
+                                </div>
+                            </div>
+
+                            <!-- Letter E -->
+                            <div class="spotlight-card">
+                                <div class="spotlight-header">
+                                    <div class="spotlight-badge">E</div>
+                                    <div class="spotlight-name">Letter 'E' (Claw Curl)</div>
+                                </div>
+                                <div class="spotlight-desc">
+                                    Curl all four fingers downward so their fingertips touch the top of your <b>thumb tucked horizontally underneath</b> them.
+                                </div>
+                                <div class="spotlight-tip">
+                                    <i class="fa-solid fa-lightbulb"></i> Tip: Tuck thumb horizontally flat beneath the four curled fingertips.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Visual Charts -->
+                    <div class="manual-images-grid">
+                        <!-- Chart 1: Alphabets -->
+                        <div class="manual-image-card">
+                            <div class="card-header">
+                                <div class="card-title">
+                                    <i class="fa-solid fa-font"></i>
+                                    <span>ASL Alphabet Reference (A - Z)</span>
+                                </div>
+                                <span class="sidebar-badge">26 Letters</span>
+                            </div>
+                            <div class="manual-img-wrap">
+                                <img src="/static/images/SignLangAlphabets.png" alt="ASL Sign Language Alphabet Reference">
+                            </div>
+                            <div class="manual-img-footer">
+                                <span style="font-size: 0.85rem; color: var(--text-muted);">One-hand finger spelling hand shapes</span>
+                            </div>
+                        </div>
+
+                        <!-- Chart 2: Common Words -->
+                        <div class="manual-image-card">
+                            <div class="card-header">
+                                <div class="card-title">
+                                    <i class="fa-solid fa-hands"></i>
+                                    <span>Conversational Sign Phrases</span>
+                                </div>
+                                <span class="sidebar-badge">7 Words</span>
+                            </div>
+                            <div class="manual-img-wrap">
+                                <img src="/static/images/SignWords.jpg" alt="Common ASL Signs Reference">
+                            </div>
+                            <div class="manual-img-footer">
+                                <span style="font-size: 0.85rem; color: var(--text-muted);">Hello, Done, Thank You, I Love You, Sorry, Please, You are welcome</span>
+                            </div>
+                        </div>
+
+                        <!-- Special Celebration Card: Messi -->
+                        <div class="manual-image-card" style="border: 1px solid rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.04);">
+                            <div class="card-header">
+                                <div class="card-title">
+                                    <i class="fa-solid fa-trophy" style="color: #f59e0b;"></i>
+                                    <span>Special Celebration: Lional Messi</span>
+                                </div>
+                                <span class="sidebar-badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);">Dual Hands</span>
+                            </div>
+                            <div style="padding: 16px; display: flex; flex-direction: column; gap: 8px;">
+                                <div style="font-size: 1.05rem; font-weight: 600; color: #f59e0b;">
+                                    lional messi-the goat🐐
+                                </div>
+                                <p style="font-size: 0.88rem; color: var(--text-main); line-height: 1.5;">
+                                    Raise <b>both hands</b> and point both <b>index fingers upward to the sky</b> with other fingers folded. Recognizes the celebration instantly with 99% confidence and types <i>"lional messi-the goat🐐"</i>!
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Complete Gesture Catalog Grid -->
+                    <div class="glass-card" style="padding: 24px;">
+                        <div class="card-title" style="margin-bottom: 8px;">
+                            <i class="fa-solid fa-list-check"></i>
+                            <span>Complete Gesture Catalog (A-Z, 7 Words & Messi)</span>
+                        </div>
+                        <p style="font-size: 0.88rem; color: var(--text-muted);">
+                            Click any gesture card below to insert it directly into your sentence builder.
+                        </p>
+                        <div class="signs-catalog-grid" id="signsCatalogGrid">
+                            <!-- Populated dynamically via /api/labels -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
     </div>
 
+    <!-- Toast Notification -->
+    <div id="toast" class="toast-msg">
+        <i class="fa-solid fa-circle-check" style="color: var(--accent-emerald);"></i>
+        <span id="toastText">Action successful</span>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <p>AI Sign Language Interpreter &bull; Powered by MediaPipe 21-Point Tracking & Scale-Invariant Random Forest</p>
+    </footer>
+
+    <!-- Client Logic -->
     <script>
-        let currentImageIndex = 0;
-        const images = document.querySelectorAll('.gallery-image');
+        // DOM Elements
+        const sentenceDisplay = document.getElementById('sentenceDisplay');
+        const signLetterBox = document.getElementById('signLetterBox');
+        const signFullName = document.getElementById('signFullName');
+        const confidenceValue = document.getElementById('confidenceValue');
+        const confidenceBar = document.getElementById('confidenceBar');
+        const trackingStatusText = document.getElementById('trackingStatusText');
+        const trackingStatusBadge = document.getElementById('trackingStatusBadge');
+        const chipsContainer = document.getElementById('chipsContainer');
+        const streamCount = document.getElementById('streamCount');
+        const signsCatalogGrid = document.getElementById('signsCatalogGrid');
+        const toggleAutoAddBtn = document.getElementById('toggleAutoAddBtn');
+        const autoAddIcon = document.getElementById('autoAddIcon');
+        const liveSignBadge = document.getElementById('liveSignBadge');
+        const liveSignConf = document.getElementById('liveSignConf');
+        const livePulseDot = document.getElementById('livePulseDot');
+        const autoHoldMeter = document.getElementById('autoHoldMeter');
+        const btnManualAddSign = document.getElementById('btnManualAddSign');
 
-        function showImage(index) {
-            images.forEach((img, i) => {
-                img.classList.toggle('active', i === index);
+        // Camera Control Elements
+        const videoFeed = document.getElementById('videoFeed');
+        const cameraStandbyOverlay = document.getElementById('cameraStandbyOverlay');
+        const standbyStartCameraBtn = document.getElementById('standbyStartCameraBtn');
+        const headerCameraToggleBtn = document.getElementById('headerCameraToggleBtn');
+        const bottomCameraToggleBtn = document.getElementById('bottomCameraToggleBtn');
+        const bottomCameraToggleText = document.getElementById('bottomCameraToggleText');
+        const hudOverlay = document.getElementById('hudOverlay');
+        const hudBottomBar = document.getElementById('hudBottomBar');
+        const cameraStatusDot = document.getElementById('cameraStatusDot');
+        const cameraStatusText = document.getElementById('cameraStatusText');
+        const quickStopCamBtn = document.getElementById('quickStopCamBtn');
+
+        // State
+        let isCameraActive = false;
+        let accumulatedSentence = "";
+        let autoAddEnabled = true;
+        let currentLiveSign = "";
+        let lastCandidateSign = "";
+        let signHoldStartTime = 0;
+        let isCurrentGestureCommitted = false;
+        let lastHandDetectedTime = 0;
+        let totalEvents = 0;
+        let pendingCandidateSign = "";
+        let pendingCandidateCount = 0;
+
+        // Hold gesture steadily for 350ms to type
+        const COMMIT_HOLD_DURATION_MS = 350;
+        // Withdrawing hand for 180ms unlocks latch so the same symbol can be typed again
+        const HAND_CLEARED_THRESHOLD_MS = 180;
+
+        // View Navigation
+        const sidebarBtns = document.querySelectorAll('.sidebar-btn');
+        const viewSections = document.querySelectorAll('.view-section');
+
+        function switchView(targetViewId) {
+            viewSections.forEach(section => {
+                section.classList.remove('active');
+            });
+            sidebarBtns.forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('data-view') === targetViewId) {
+                    btn.classList.add('active');
+                }
+            });
+
+            const targetSection = document.getElementById(targetViewId);
+            if (targetSection) {
+                targetSection.classList.add('active');
+            }
+
+            // If navigating away from the video view, release camera to save hardware
+            if (targetViewId !== 'view-video') {
+                if (isCameraActive) {
+                    stopCamera();
+                    showToast("Webcam released while viewing manual", "fa-power-off");
+                }
+            }
+        }
+
+        sidebarBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetView = btn.getAttribute('data-view');
+                switchView(targetView);
+            });
+        });
+
+        // Camera Hardware Lifecycle Management
+        function startCamera() {
+            if (isCameraActive) return;
+            cameraStatusText.textContent = "Connecting...";
+            cameraStatusDot.style.color = "var(--accent-amber)";
+
+            fetch('/api/camera/start', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.is_running) {
+                        isCameraActive = true;
+                        videoFeed.src = '/video_feed?t=' + Date.now();
+                        videoFeed.style.display = 'block';
+                        cameraStandbyOverlay.classList.add('hidden');
+                        hudOverlay.style.display = 'flex';
+                        hudBottomBar.style.display = 'flex';
+
+                        headerCameraToggleBtn.innerHTML = '<i class="fa-solid fa-stop"></i> <span>Stop Camera</span>';
+                        headerCameraToggleBtn.classList.add('btn-danger');
+                        bottomCameraToggleBtn.classList.add('btn-danger');
+                        bottomCameraToggleText.textContent = 'Turn Camera OFF';
+                        cameraStatusDot.style.color = 'var(--accent-emerald)';
+                        cameraStatusText.textContent = 'Camera Live (30 FPS)';
+                        showToast("Webcam connected & active", "fa-video");
+                    } else {
+                        throw new Error(data && data.error ? data.error : "Camera unavailable");
+                    }
+                })
+                .catch(err => {
+                    console.error("Camera start failed:", err);
+                    isCameraActive = false;
+                    videoFeed.src = '';
+                    cameraStatusText.textContent = "Camera Off";
+                    cameraStatusDot.style.color = "var(--text-sub)";
+                    showToast("Failed to access camera. Please check permissions", "fa-triangle-exclamation");
+                });
+        }
+
+        function stopCamera() {
+            if (!isCameraActive && (!videoFeed.src || videoFeed.src === window.location.href)) return;
+            isCameraActive = false;
+            videoFeed.src = '';
+            videoFeed.style.display = 'none';
+            cameraStandbyOverlay.classList.remove('hidden');
+            hudOverlay.style.display = 'none';
+            hudBottomBar.style.display = 'none';
+
+            headerCameraToggleBtn.innerHTML = '<i class="fa-solid fa-video"></i> <span>Start Camera</span>';
+            headerCameraToggleBtn.classList.remove('btn-danger');
+            bottomCameraToggleBtn.classList.remove('btn-danger');
+            bottomCameraToggleText.textContent = 'Turn Camera ON';
+            cameraStatusDot.style.color = 'var(--text-sub)';
+            cameraStatusText.textContent = 'Camera Off';
+
+            currentLiveSign = "";
+            lastCandidateSign = "";
+            signHoldStartTime = 0;
+            isCurrentGestureCommitted = false;
+            if (autoHoldMeter) autoHoldMeter.style.width = '0%';
+            if (liveSignBadge) liveSignBadge.textContent = '-';
+            if (liveSignConf) {
+                liveSignConf.textContent = '(Camera Off)';
+                liveSignConf.style.color = 'var(--text-sub)';
+            }
+            if (livePulseDot) livePulseDot.classList.remove('active');
+
+            fetch('/api/camera/stop', { method: 'POST' })
+                .then(res => res.json())
+                .then(() => {
+                    showToast("Webcam released", "fa-power-off");
+                })
+                .catch(err => console.error(err));
+        }
+
+        function toggleCamera() {
+            if (isCameraActive) {
+                stopCamera();
+            } else {
+                startCamera();
+            }
+        }
+
+        if (standbyStartCameraBtn) standbyStartCameraBtn.addEventListener('click', startCamera);
+        if (headerCameraToggleBtn) headerCameraToggleBtn.addEventListener('click', toggleCamera);
+        if (bottomCameraToggleBtn) bottomCameraToggleBtn.addEventListener('click', toggleCamera);
+        if (quickStopCamBtn) quickStopCamBtn.addEventListener('click', stopCamera);
+
+        // Toast feedback
+        function showToast(text, iconClass = "fa-circle-check") {
+            const toast = document.getElementById('toast');
+            const toastText = document.getElementById('toastText');
+            toast.querySelector('i').className = `fa-solid ${iconClass}`;
+            toastText.textContent = text;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2600);
+        }
+
+        // Render Sign into Text Display
+        function updateSentenceUI(updateValue = true) {
+            const charCountEl = document.getElementById('statCharCount');
+            const wordCountEl = document.getElementById('statWordCount');
+            const latestSignEl = document.getElementById('statLatestSign');
+
+            if (updateValue && sentenceDisplay.value !== accumulatedSentence) {
+                sentenceDisplay.value = accumulatedSentence;
+            }
+
+            const currentText = sentenceDisplay.value;
+            if (charCountEl) charCountEl.textContent = currentText.length;
+            const words = currentText.trim().split(/\s+/).filter(w => w.length > 0);
+            if (wordCountEl) wordCountEl.textContent = words.length;
+        }
+
+        // Allow direct typing and editing in the text box
+        sentenceDisplay.addEventListener('input', () => {
+            accumulatedSentence = sentenceDisplay.value;
+            updateSentenceUI(false);
+        });
+
+        // Add character or phrase to sign-into-text box
+        function commitSign(text) {
+            if (!text) return;
+            accumulatedSentence = sentenceDisplay.value;
+            if (accumulatedSentence.length > 0 && !accumulatedSentence.endsWith(" ") && text.length > 1) {
+                accumulatedSentence += " ";
+            }
+            accumulatedSentence += text;
+            if (text.length > 1) {
+                accumulatedSentence += " ";
+            }
+            const latestSignEl = document.getElementById('statLatestSign');
+            if (latestSignEl) latestSignEl.textContent = text;
+            updateSentenceUI(true);
+            addHistoryChip(text, 100);
+            sentenceDisplay.scrollTop = sentenceDisplay.scrollHeight;
+        }
+
+        if (btnManualAddSign) {
+            btnManualAddSign.addEventListener('click', () => {
+                const liveText = currentLiveSign || (liveSignBadge ? liveSignBadge.textContent : "");
+                if (liveText && liveText !== "-") {
+                    commitSign(liveText);
+                    showToast(`Added "${liveText}"`);
+                } else {
+                    showToast("Position hand in camera to detect sign", "fa-circle-exclamation");
+                }
             });
         }
 
-        function prevImage() {
-            currentImageIndex = (currentImageIndex === 0) ? images.length - 1 : currentImageIndex - 1;
-            showImage(currentImageIndex);
+
+        // History Chips
+        function addHistoryChip(text, confidence) {
+            totalEvents++;
+            streamCount.textContent = `${totalEvents} events recorded`;
+
+            if (chipsContainer.children.length === 1 && chipsContainer.children[0].textContent.includes("waiting")) {
+                chipsContainer.innerHTML = "";
+            }
+
+            const isMessi = (text && text.toLowerCase().includes('messi'));
+            const chip = document.createElement('span');
+            chip.className = 'sign-chip';
+            if (isMessi) {
+                chip.style.borderColor = 'rgba(245, 158, 11, 0.7)';
+                chip.style.background = 'rgba(245, 158, 11, 0.18)';
+                chip.style.color = '#fbbf24';
+                chip.innerHTML = `lional messi-the goat🐐 <span class="chip-conf">${Math.round(confidence)}%</span>`;
+            } else {
+                chip.innerHTML = `${text} <span class="chip-conf">${Math.round(confidence)}%</span>`;
+            }
+            chipsContainer.prepend(chip);
+
+            while (chipsContainer.children.length > 25) {
+                chipsContainer.removeChild(chipsContainer.lastChild);
+            }
         }
 
-        function nextImage() {
-            currentImageIndex = (currentImageIndex === images.length - 1) ? 0 : currentImageIndex + 1;
-            showImage(currentImageIndex);
-        }
+        // Connect to Socket.IO
+        const socket = io();
 
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'ArrowLeft') {
-                prevImage();
-            } else if (event.key === 'ArrowRight') {
-                nextImage();
+        socket.on('connect', () => {
+            console.log('Socket.IO connected to server.');
+        });
+
+        socket.on('disconnect', () => {
+            trackingStatusText.textContent = "Reconnecting...";
+            trackingStatusBadge.classList.remove('active');
+        });
+
+        socket.on('camera_status', (data) => {
+            if (data.running && !isCameraActive) {
+                isCameraActive = true;
+                videoFeed.src = '/video_feed?t=' + Date.now();
+                videoFeed.style.display = 'block';
+                cameraStandbyOverlay.classList.add('hidden');
+                hudOverlay.style.display = 'flex';
+                hudBottomBar.style.display = 'flex';
+                headerCameraToggleBtn.innerHTML = '<i class="fa-solid fa-stop"></i> <span>Stop Camera</span>';
+                headerCameraToggleBtn.classList.add('btn-danger');
+                bottomCameraToggleBtn.classList.add('btn-danger');
+                bottomCameraToggleText.textContent = 'Turn Camera OFF';
+                cameraStatusDot.style.color = 'var(--accent-emerald)';
+                cameraStatusText.textContent = 'Camera Live (30 FPS)';
+            } else if (!data.running && isCameraActive) {
+                isCameraActive = false;
+                videoFeed.src = '';
+                videoFeed.style.display = 'none';
+                cameraStandbyOverlay.classList.remove('hidden');
+                hudOverlay.style.display = 'none';
+                hudBottomBar.style.display = 'none';
+                headerCameraToggleBtn.innerHTML = '<i class="fa-solid fa-video"></i> <span>Start Camera</span>';
+                headerCameraToggleBtn.classList.remove('btn-danger');
+                bottomCameraToggleBtn.classList.remove('btn-danger');
+                bottomCameraToggleText.textContent = 'Turn Camera ON';
+                cameraStatusDot.style.color = 'var(--text-sub)';
+                cameraStatusText.textContent = data.error ? 'Camera Unavailable' : 'Camera Off';
+                if (data.error) {
+                    showToast(data.error, "fa-triangle-exclamation");
+                }
             }
         });
+
+        function handlePrediction(data) {
+            const now = Date.now();
+
+            if (data && data.detected && data.text && data.text.trim().length > 0) {
+                lastHandDetectedTime = now;
+                currentLiveSign = data.text;
+
+                if (trackingStatusBadge) {
+                    trackingStatusBadge.classList.add('active');
+                    trackingStatusText.textContent = "Hand Tracked";
+                }
+
+                const isMessi = (data.text && data.text.toLowerCase().includes('messi'));
+
+                // Update HUD Displays inside Video Card
+                if (signLetterBox) {
+                    signLetterBox.textContent = isMessi ? '🐐' : (data.text.length > 3 ? data.text.substring(0, 2) : data.text);
+                }
+                if (signFullName) {
+                    signFullName.innerHTML = isMessi ? 'lional messi-the goat🐐' : data.text;
+                }
+                if (confidenceValue) confidenceValue.textContent = `${data.confidence.toFixed(1)}%`;
+                if (confidenceBar) confidenceBar.style.width = `${Math.min(100, data.confidence)}%`;
+
+                // Update Live Real-Time Sign Banner above Text Box
+                if (livePulseDot) livePulseDot.classList.add('active');
+                if (liveSignBadge) {
+                    liveSignBadge.innerHTML = isMessi ? 'lional messi-the goat🐐' : data.text;
+                }
+
+                // Confidence color coding
+                if (data.confidence >= 65) {
+                    confidenceBar.style.background = 'linear-gradient(90deg, #10b981, #06b6d4)';
+                    confidenceValue.style.color = '#10b981';
+                } else if (data.confidence >= 45) {
+                    confidenceBar.style.background = 'linear-gradient(90deg, #f59e0b, #6366f1)';
+                    confidenceValue.style.color = '#f59e0b';
+                } else {
+                    confidenceBar.style.background = 'linear-gradient(90deg, #ef4444, #f59e0b)';
+                    confidenceValue.style.color = '#ef4444';
+                }
+
+                // Auto-Add Sentence Logic:
+                // Types sign ONCE when held steadily for COMMIT_HOLD_DURATION_MS (350ms).
+                // Requires 2 consecutive frames of confirmation before switching candidates, preventing any flicker between signs!
+                if (autoAddEnabled && data.confidence >= 30) {
+                    if (data.text === lastCandidateSign) {
+                        pendingCandidateSign = "";
+                        pendingCandidateCount = 0;
+
+                        if (!isCurrentGestureCommitted) {
+                            const holdDuration = now - signHoldStartTime;
+                            const pct = Math.min(100, (holdDuration / COMMIT_HOLD_DURATION_MS) * 100);
+                            if (autoHoldMeter) autoHoldMeter.style.width = pct + '%';
+
+                            if (liveSignConf) {
+                                liveSignConf.textContent = `Holding to type... (${data.confidence.toFixed(1)}%)`;
+                                liveSignConf.style.color = "var(--accent-cyan)";
+                            }
+
+                            if (holdDuration >= COMMIT_HOLD_DURATION_MS) {
+                                commitSign(data.text);
+                                isCurrentGestureCommitted = true;
+                                if (autoHoldMeter) autoHoldMeter.style.width = '100%';
+                                if (liveSignConf) {
+                                    liveSignConf.textContent = `✓ Typed "${data.text}"! Clear hand to repeat`;
+                                    liveSignConf.style.color = "var(--accent-emerald)";
+                                }
+                            }
+                        } else {
+                            // Already typed for this gesture presentation!
+                            if (autoHoldMeter) autoHoldMeter.style.width = '100%';
+                            if (liveSignConf) {
+                                liveSignConf.textContent = `✓ Typed "${data.text}" (Clear hand to repeat)`;
+                                liveSignConf.style.color = "var(--accent-emerald)";
+                            }
+                        }
+                    } else {
+                        // Candidate change debounce: require at least 2 consecutive frames before switching
+                        if (data.text === pendingCandidateSign) {
+                            pendingCandidateCount++;
+                            if (pendingCandidateCount >= 2 || !lastCandidateSign) {
+                                lastCandidateSign = data.text;
+                                signHoldStartTime = now;
+                                isCurrentGestureCommitted = false;
+                                pendingCandidateSign = "";
+                                pendingCandidateCount = 0;
+                                if (autoHoldMeter) autoHoldMeter.style.width = '0%';
+                                if (liveSignConf) {
+                                    liveSignConf.textContent = `(${data.confidence.toFixed(1)}% confidence)`;
+                                    liveSignConf.style.color = data.confidence >= 55 ? "var(--accent-emerald)" : "var(--accent-cyan)";
+                                }
+                            }
+                        } else {
+                            pendingCandidateSign = data.text;
+                            pendingCandidateCount = 1;
+                        }
+                    }
+                }
+            } else {
+                // Hand absent in current frame
+                const elapsedSinceHand = now - lastHandDetectedTime;
+
+                // When hand is cleared for at least HAND_CLEARED_THRESHOLD_MS (180ms):
+                // Reset gesture lock so the user can show the same sign again or a new sign
+                if (elapsedSinceHand >= HAND_CLEARED_THRESHOLD_MS) {
+                    currentLiveSign = "";
+                    lastCandidateSign = "";
+                    pendingCandidateSign = "";
+                    pendingCandidateCount = 0;
+                    signHoldStartTime = 0;
+                    isCurrentGestureCommitted = false;
+
+                    if (trackingStatusBadge) {
+                        trackingStatusBadge.classList.remove('active');
+                        trackingStatusText.textContent = "Awaiting Hand...";
+                    }
+                    if (signLetterBox) signLetterBox.textContent = "-";
+                    if (signFullName) signFullName.textContent = "Position hand in camera";
+                    if (confidenceValue) confidenceValue.textContent = "0.0%";
+                    if (confidenceBar) confidenceBar.style.width = "0%";
+
+                    if (livePulseDot) livePulseDot.classList.remove('active');
+                    if (liveSignBadge) liveSignBadge.textContent = "-";
+                    if (liveSignConf) {
+                        liveSignConf.textContent = "(Hand cleared - ready for next sign)";
+                        liveSignConf.style.color = "var(--text-sub)";
+                    }
+                    if (autoHoldMeter) autoHoldMeter.style.width = '0%';
+                }
+            }
+        }
+
+        // Listen for Real-Time Predictions via WebSocket
+        socket.on('prediction', handlePrediction);
+
+        // Graceful fallback polling: ONLY active if WebSocket is disconnected
+        setInterval(() => {
+            if (isCameraActive && (!socket || !socket.connected)) {
+                fetch('/api/prediction')
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data && data.text !== undefined) {
+                            handlePrediction(data);
+                        }
+                    })
+                    .catch(() => {});
+            }
+        }, 600);
+
+        // Text Controls
+        document.getElementById('spaceBtn').addEventListener('click', () => {
+            accumulatedSentence += " ";
+            updateSentenceUI();
+        });
+
+        document.getElementById('backspaceBtn').addEventListener('click', () => {
+            if (accumulatedSentence.length > 0) {
+                accumulatedSentence = accumulatedSentence.slice(0, -1);
+                updateSentenceUI();
+            }
+        });
+
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            accumulatedSentence = "";
+            updateSentenceUI();
+            showToast("Text cleared", "fa-trash-can");
+        });
+
+        document.getElementById('copyBtn').addEventListener('click', () => {
+            const text = accumulatedSentence.trim();
+            if (!text) {
+                showToast("Text is empty", "fa-circle-exclamation");
+                return;
+            }
+            navigator.clipboard.writeText(text).then(() => {
+                showToast("Copied text to clipboard!");
+            });
+        });
+
+        toggleAutoAddBtn.addEventListener('click', () => {
+            autoAddEnabled = !autoAddEnabled;
+            if (autoAddEnabled) {
+                toggleAutoAddBtn.innerHTML = '<i class="fa-solid fa-toggle-on" id="autoAddIcon"></i> Auto-Add: ON';
+                toggleAutoAddBtn.classList.remove('btn-danger');
+                showToast("Auto-add enabled");
+            } else {
+                toggleAutoAddBtn.innerHTML = '<i class="fa-solid fa-toggle-off" id="autoAddIcon"></i> Auto-Add: OFF';
+                toggleAutoAddBtn.classList.add('btn-danger');
+                showToast("Auto-add paused");
+            }
+        });
+
+        // Keyboard Shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.key === ' ' || e.code === 'Space') {
+                e.preventDefault();
+                document.getElementById('spaceBtn').click();
+            } else if (e.key === 'Backspace') {
+                e.preventDefault();
+                document.getElementById('backspaceBtn').click();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('spaceBtn').click();
+            }
+        });
+
+        // Fetch & Populate 33 Catalog Grid in User Manual
+        fetch('/api/labels')
+            .then(res => res.json())
+            .then(labels => {
+                signsCatalogGrid.innerHTML = "";
+                Object.keys(labels).forEach(key => {
+                    const card = document.createElement('div');
+                    card.className = 'catalog-card';
+                    card.innerHTML = `
+                        <div class="catalog-letter">${labels[key]}</div>
+                        <div class="catalog-id">ID: ${key}</div>
+                    `;
+                    card.addEventListener('click', () => {
+                        commitSign(labels[key]);
+                        showToast(`Inserted "${labels[key]}"`);
+                    });
+                    signsCatalogGrid.appendChild(card);
+                });
+            })
+            .catch(err => console.error("Error loading labels:", err));
     </script>
 </body>
 </html>
